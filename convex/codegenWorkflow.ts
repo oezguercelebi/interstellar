@@ -12,6 +12,7 @@ const variantArg = v.object({
   model: v.string(),
   effort: v.optional(v.string()),
   styleDirective: v.string(),
+  userPrompt: v.optional(v.string()), // present on first-gen; absent on edits (plan step skipped)
 });
 
 /**

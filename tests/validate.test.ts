@@ -13,6 +13,17 @@ function goodApp(): ValidatableFile[] {
       contents: `import { Stack } from "expo-router";\nexport default function L(){ return <Stack/>; }\n`,
     },
     {
+      path: "components/Screen.tsx",
+      contents:
+        `import React from "react";\n` +
+        `import { View } from "react-native";\n` +
+        `import { useSafeAreaInsets } from "react-native-safe-area-context";\n` +
+        `export function Screen({ children }: { children: React.ReactNode }) {\n` +
+        `  const insets = useSafeAreaInsets();\n` +
+        `  return <View style={{ paddingTop: insets.top }}>{children}</View>;\n` +
+        `}\n`,
+    },
+    {
       path: "app/index.tsx",
       contents:
         `import { View, Text } from "react-native";\n` +

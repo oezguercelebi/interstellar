@@ -57,6 +57,7 @@ export const patch = internalMutation({
     threadId: v.optional(v.string()),
     workflowId: v.optional(v.string()),
     error: v.optional(v.string()),
+    plan: v.optional(v.string()),
   },
   handler: async (ctx, { versionId, ...rest }) => {
     const patch = Object.fromEntries(

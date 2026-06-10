@@ -49,6 +49,7 @@ export default defineSchema({
     sandboxProvider: v.optional(v.string()), // daytona | snack | provisioning | none | error
     error: v.optional(v.string()),
     parentVersionId: v.optional(v.id("versions")),
+    plan: v.optional(v.string()), // JSON-encoded app plan from the plan step (first-gen only)
     createdAt: v.number(),
   })
     .index("by_project", ["projectId"])

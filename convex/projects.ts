@@ -15,6 +15,7 @@ import {
   themeName,
 } from "./lib/styles";
 import { validateManifest } from "./lib/validate";
+import { STARTER_FILES } from "./agents/starterKit";
 
 const DEMO_USER = "demo";
 
@@ -68,6 +69,14 @@ export const start = mutation({
         threadId,
         createdAt: Date.now(),
       });
+      // Seed starter-kit files so required-file validation passes immediately
+      // and the model can focus on product screens rather than infrastructure.
+      // Only for first generation — edits clone the parent's files instead.
+      await ctx.runMutation(internal.files.seedStarter, {
+        versionId,
+        files: STARTER_FILES,
+      });
+
       variantArgs.push({
         versionId,
         threadId,
@@ -75,6 +84,7 @@ export const start = mutation({
         model,
         effort,
         styleDirective: directive,
+        userPrompt: prompt,
       });
     }
 

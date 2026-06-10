@@ -23,7 +23,7 @@ export interface ValidationResult {
 }
 
 /** Files every generated app must contain. */
-const REQUIRED_FILES = ["app/_layout.tsx", "theme/tokens.ts"];
+const REQUIRED_FILES = ["app/_layout.tsx", "theme/tokens.ts", "components/Screen.tsx"];
 
 /** A real screen (not the layout) must exist under app/. */
 const SCREEN_RE = /^app\/.*\.tsx$/;

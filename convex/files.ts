@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "./_generated/server";
+import type { StarterFile } from "./agents/starterKit";
 
 /** Public: the live file list for a version — powers the activity log + code view. */
 export const listByVersion = query({
@@ -64,6 +65,41 @@ export const remove = internalMutation({
       .withIndex("by_version_path", (q) => q.eq("versionId", versionId).eq("path", path))
       .unique();
     if (existing) await ctx.db.patch(existing._id, { deleted: true, updatedAt: Date.now() });
+  },
+});
+
+/**
+ * Internal: bulk-insert the starter-kit files for a fresh first-generation version.
+ * Called once per variant right after the version row is created in projects.start.
+ * Uses upsert semantics (by_version_path index) so it is safe to call more than once.
+ */
+export const seedStarter = internalMutation({
+  args: {
+    versionId: v.id("versions"),
+    files: v.array(
+      v.object({ path: v.string(), contents: v.string(), purpose: v.string() }),
+    ),
+  },
+  handler: async (ctx, { versionId, files }) => {
+    const now = Date.now();
+    for (const f of files) {
+      const existing = await ctx.db
+        .query("files")
+        .withIndex("by_version_path", (q) =>
+          q.eq("versionId", versionId).eq("path", f.path),
+        )
+        .unique();
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          contents: f.contents,
+          purpose: f.purpose,
+          deleted: false,
+          updatedAt: now,
+        });
+      } else {
+        await ctx.db.insert("files", { versionId, ...f, updatedAt: now });
+      }
+    }
   },
 });
 
