@@ -22,10 +22,6 @@ export const THEME_OPTIONS: ThemeOption[] = [
 
 export const DEFAULT_THEME = "auto";
 
-export function themeName(id?: string): string {
-  return THEME_OPTIONS.find((t) => t.id === id)?.name ?? "Auto";
-}
-
 export function themeOption(id?: string): ThemeOption {
   return THEME_OPTIONS.find((t) => t.id === id) ?? THEME_OPTIONS[0];
 }

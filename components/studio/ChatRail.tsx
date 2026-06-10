@@ -19,11 +19,9 @@ import { toast } from "sonner";
 export function ChatRail({
   version,
   projectId,
-  onVersionCreated,
 }: {
   version: Doc<"versions">;
   projectId: Id<"projects">;
-  onVersionCreated?: (id: Id<"versions">) => void;
 }) {
   const edit = useMutation(api.projects.edit);
   const [draft, setDraft] = useState("");
@@ -53,8 +51,7 @@ export function ChatRail({
     setBusy(true);
     setDraft("");
     try {
-      const { versionId } = await edit({ projectId, prompt });
-      onVersionCreated?.(versionId);
+      await edit({ projectId, prompt });
     } catch (err) {
       console.error(err);
       toast.error("Couldn't apply that edit.");

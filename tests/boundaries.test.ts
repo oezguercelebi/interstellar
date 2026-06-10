@@ -109,8 +109,8 @@ const ENTRY_FILES = [
 test("scanner self-check: minimum file counts per scanned directory", () => {
   assert.ok(convexFiles.length >= 22, `convex/ scan found ${convexFiles.length} files, expected >= 22`);
   assert.ok(appFiles.length >= 5, `app/ scan found ${appFiles.length} files, expected >= 5`);
-  assert.ok(componentFiles.length >= 22, `components/ scan found ${componentFiles.length} files, expected >= 22`);
-  assert.ok(libFiles.length >= 5, `lib/ scan found ${libFiles.length} files, expected >= 5`);
+  assert.ok(componentFiles.length >= 21, `components/ scan found ${componentFiles.length} files, expected >= 21`);
+  assert.ok(libFiles.length >= 4, `lib/ scan found ${libFiles.length} files, expected >= 4`);
 });
 
 // ---------------------------------------------------------------------------

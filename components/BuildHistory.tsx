@@ -5,7 +5,6 @@ import { useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import { Loader2, AlertCircle, Cpu, Clock, ArrowUpRight } from "lucide-react";
 import { api } from "@/convex/_generated/api";
-import { InterstellarMark } from "@/components/InterstellarMark";
 import { modelName } from "@/lib/models";
 import { timeAgo, cn } from "@/lib/utils";
 
@@ -126,6 +125,3 @@ export function BuildHistory() {
     </motion.section>
   );
 }
-
-// kept for potential future use
-export const _InterstellarMark = InterstellarMark;
