@@ -233,7 +233,16 @@ async function runTypecheckRepair(
     }
 
     await provider.uploadFiles(sandboxId, fixedFiles, proj);
-    console.log("[tsc-repair] re-uploaded fixed files — Metro will hot-reload");
+
+    // Hot reload is not trustworthy after a repair re-upload (observed live:
+    // Metro under CI=1 + NativeWind dies silently on the change) — relaunch
+    // the dev server when the provider supports it. Best-effort like the rest.
+    if (provider.restartDevServer) {
+      await provider.restartDevServer(sandboxId, proj);
+      console.log("[tsc-repair] re-uploaded fixed files — dev server restarted");
+    } else {
+      console.log("[tsc-repair] re-uploaded fixed files — Metro will hot-reload");
+    }
   } catch (err) {
     // Never break the preview — log and move on.
     console.warn("[tsc-repair] repair loop failed (non-fatal):", String(err).slice(0, 300));

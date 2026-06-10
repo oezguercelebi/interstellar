@@ -80,4 +80,11 @@ export interface SandboxProvider {
    * Optional — providers that don't implement this return undefined.
    */
   uploadFiles?(sandboxId: string, files: AppFile[], projectRoot: string): Promise<void>;
+
+  /**
+   * Kill and relaunch the dev server in an existing sandbox. Used after
+   * repair re-uploads, where hot reload has been observed to die under the
+   * NativeWind Metro pipeline. Optional.
+   */
+  restartDevServer?(sandboxId: string, projectRoot: string): Promise<void>;
 }

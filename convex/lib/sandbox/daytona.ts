@@ -209,12 +209,7 @@ export class DaytonaProvider implements SandboxProvider {
     // snapshot's node_modules) so there's no npx download delay. The outer
     // command sleeps 5s (so Metro can bind its port) then exits, letting
     // executeCommand return while Metro keeps running.
-    await sandbox.process.executeCommand(
-      `(CI=1 EXPO_NO_TELEMETRY=1 nohup ./node_modules/.bin/expo start --web --port ${PREVIEW_PORT} < /dev/null > /tmp/expo.log 2>&1 &) ; sleep 5 ; echo metro-launched`,
-      proj,
-      undefined,
-      60, // 60s for the launch + sleep 5
-    );
+    await sandbox.process.executeCommand(METRO_LAUNCH_CMD, proj, undefined, 60);
 
     // ── GET PREVIEW URL ──────────────────────────────────────────────────────
     const preview = await sandbox.getPreviewLink(PREVIEW_PORT);
@@ -262,4 +257,27 @@ export class DaytonaProvider implements SandboxProvider {
     const authHeader = `Bearer ${apiKey}`;
     await uploadFilesViaToolbox(sandbox, toolboxBase, authHeader, projectRoot, files);
   }
+
+  /**
+   * Kill and relaunch Metro in an existing sandbox. Observed live (first
+   * nativewind generation): Metro under CI=1 + the NativeWind plugin dies
+   * silently after a repair re-upload instead of hot-reloading; a relaunch
+   * restores the preview instantly. pkill exits 1 when nothing matched, so
+   * the `|| true` keeps the chain going on a clean sandbox.
+   */
+  async restartDevServer(sandboxId: string, projectRoot: string): Promise<void> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
+    const daytona = new Daytona({ apiKey, apiUrl: process.env.DAYTONA_API_URL });
+    const sandbox = await daytona.get(sandboxId);
+    await sandbox.process.executeCommand(
+      `pkill -f 'expo start' || true ; ${METRO_LAUNCH_CMD}`,
+      projectRoot,
+      undefined,
+      60,
+    );
+  }
 }
+
+/** Detached Metro launch (shared by provision + restartDevServer). */
+const METRO_LAUNCH_CMD = `(CI=1 EXPO_NO_TELEMETRY=1 nohup ./node_modules/.bin/expo start --web --port ${PREVIEW_PORT} < /dev/null > /tmp/expo.log 2>&1 &) ; sleep 5 ; echo metro-launched`;
