@@ -293,6 +293,17 @@ test("C6: daytona.ts is reachable only from the preview.ts entry (import-graph B
     ["convex/preview.ts"],
     "the Daytona SDK module must be reachable only via the use-node entry convex/preview.ts (C6)",
   );
+
+  // Same seam, sandbox-module internals: typecheckRepair is preview machinery.
+  // (Not a node-isolation concern — its ai/zod imports run in the isolate
+  // runtime too — purely a module-boundary rule.)
+  const internalGoal = "convex/lib/sandbox/typecheckRepair.ts";
+  const internalReachers = ENTRY_FILES.filter((e) => reaches(e, internalGoal));
+  assert.deepEqual(
+    internalReachers,
+    ["convex/preview.ts"],
+    "sandbox-module internals must be reachable only via convex/preview.ts",
+  );
 });
 
 // ---------------------------------------------------------------------------
