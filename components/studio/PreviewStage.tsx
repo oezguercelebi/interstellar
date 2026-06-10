@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import html2canvas from "html2canvas";
-import { Code2, ExternalLink, Loader2, QrCode, RefreshCw, RotateCw, Smartphone } from "lucide-react";
+import { Code2, ExternalLink, QrCode, RefreshCw, RotateCw, Smartphone } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 
@@ -328,14 +328,12 @@ function PreviewBody({
 function BootScreen({ label }: { label: string }) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-5 bg-[#0A0B0D] text-center text-white/90">
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ duration: 14, repeat: Infinity, ease: "linear" }}
-      >
+      {/* CSS-driven (compositor) rotation — smoother than a JS transform loop.
+          The ring is symmetric, so only the orange craft dot visibly orbits. */}
+      <div className="animate-orbit-spin [will-change:transform]">
         <InterstellarMark className="h-12 w-12" />
-      </motion.div>
-      <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-white/60">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      </div>
+      <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-white/55">
         {label}
       </p>
     </div>

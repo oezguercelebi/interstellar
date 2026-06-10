@@ -58,14 +58,16 @@ export function ActivityLog({
                 layout
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm"
+                className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-sm"
               >
-                <Icon className="h-4 w-4 shrink-0 text-foreground/50" />
-                <span className="shrink-0 font-medium text-foreground/90">{f.purpose}</span>
-                <code className="truncate font-mono text-xs text-muted-foreground/60">
-                  {f.path}
-                </code>
-                <span className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ios-green/15">
+                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/50" />
+                <div className="min-w-0 flex-1 leading-snug">
+                  <span className="font-medium text-foreground/90">{f.purpose}</span>
+                  <code className="ml-1.5 break-all font-mono text-xs text-muted-foreground/60">
+                    {f.path}
+                  </code>
+                </div>
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ios-green/15">
                   <Check className="h-3 w-3 text-ios-green" strokeWidth={3} />
                 </span>
               </motion.div>
