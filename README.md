@@ -79,27 +79,52 @@ Convex actions run server-side, so mirror the agent/sandbox vars into Convex:
 npx convex env set ANTHROPIC_API_KEY sk-ant-...
 npx convex env set DAYTONA_API_KEY ...
 npx convex env set DAYTONA_API_URL https://app.daytona.io/api
-npx convex env set DAYTONA_SNAPSHOT interstellar-studio
+npx convex env set DAYTONA_SNAPSHOT interstellar-studio-nw1
 npx convex env set DAYTONA_TARGET eu        # your Daytona org region: eu | us
 ```
 
 ### 4. Bake the Daytona snapshot
 
-This builds the **`interstellar-studio`** snapshot from a Node 20 image + a full
-Expo Router app with all allowed dependencies pre-installed and 4 GB memory so
-Metro doesn't OOM:
+This builds the **`interstellar-studio-nw1`** snapshot from a Node 20 image + a
+full Expo Router app with all allowed dependencies pre-installed — including the
+NativeWind (Tailwind) toolchain, so the one snapshot runs **both** starter kits
+(classic StyleSheet and NativeWind) — and 4 GB memory so Metro doesn't OOM:
 
 ```bash
 node scripts/bake-snapshot.mjs
 ```
 
 > Until the snapshot exists, builds fall back to a slow cold path (~3–5 min per
-> preview); with it, previews provision in ~30–90 s.
+> preview); with it, previews provision in ~30–90 s. The NativeWind starter kit
+> has no cold path at all — it requires the pre-baked snapshot.
 >
 > **Note:** a freshly baked snapshot can take ~10–15 minutes after reaching
 > "active" before Daytona's runners can schedule it. If your first build fails
 > with `No available runners`, wait a few minutes and retry — it's propagation,
 > not a config problem.
+
+#### Choosing the starter kit — and the rollout order
+
+`STARTER_KIT` (a Convex env var) picks the starter kit for **new** generations:
+unset (or any unknown value) means the classic StyleSheet kit;
+`npx convex env set STARTER_KIT nativewind` switches new apps to the NativeWind
+kit. Every version is stamped with its kit at creation — edits of old projects
+keep their original kit forever, regardless of later env flips.
+
+**Upgrading an existing deployment? Only this order is safe:**
+
+1. Deploy the code (classic stays the default while `STARTER_KIT` is unset).
+2. Bake the new snapshot: `node scripts/bake-snapshot.mjs`.
+3. `npx convex env set DAYTONA_SNAPSHOT interstellar-studio-nw1` — wait out the
+   schedulability window above, then verify one **classic** first-gen preview
+   AND one reopen of a pre-upgrade version (the snapshot is a superset; classic
+   apps must still run on it).
+4. `npx convex env set STARTER_KIT nativewind`.
+
+Rollback levers, each independent: `npx convex env unset STARTER_KIT` (instant —
+new generations revert to classic) and restoring the previous `DAYTONA_SNAPSHOT`
+(full snapshot rollback). Fresh installs just bake once, set
+`DAYTONA_SNAPSHOT=interstellar-studio-nw1`, and may set `STARTER_KIT` right away.
 
 ### 5. Preview proxy region
 

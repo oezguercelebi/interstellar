@@ -16,6 +16,11 @@
 /**
  * The Expo project root inside a sandbox.
  * Baked into the Daytona snapshot by scripts/bake-snapshot.mjs — these must agree.
+ *
+ * Layout note: generated source dirs (app/, components/, store/, theme/, lib/)
+ * upload 1:1 into this root; provisioning rm-rfs exactly that set first, so
+ * baked root config files (tailwind.config.js, global.css, babel/metro config,
+ * nativewind-env.d.ts) survive every upload.
  */
 export const SANDBOX_APP_ROOT = "/home/daytona/expo-app";
 
@@ -28,6 +33,17 @@ export interface AppFile {
 export interface ProvisionResult {
   sandboxId: string;
   previewUrl: string;
+}
+
+/** Optional provisioning context. */
+export interface ProvisionOpts {
+  /**
+   * Starter kit of the generated app (absent = "classic"). "nativewind" apps
+   * only run on the NativeWind-baked snapshot — providers must fail fast with
+   * an actionable error rather than serve a broken (HTTP-200 error overlay)
+   * preview.
+   */
+  kit?: "classic" | "nativewind";
 }
 
 /** Result of a sandboxed command execution. */
@@ -46,7 +62,7 @@ export interface SandboxProvider {
    * dev server, and return the public preview URL. Throw on failure — the
    * caller records the error on the version.
    */
-  provision(files: AppFile[]): Promise<ProvisionResult>;
+  provision(files: AppFile[], opts?: ProvisionOpts): Promise<ProvisionResult>;
 
   /**
    * Execute a shell command inside an existing sandbox.

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   STABLE_SYSTEM_PREFIX,
+  STABLE_SYSTEM_PREFIX_NATIVEWIND,
   buildVolatileSuffix,
   buildSystemBlocks,
   buildInstructions,
@@ -157,4 +158,96 @@ test("buildInstructions joins stable + volatile with double newline", () => {
   // The separator must be exactly \n\n before the # STYLE DIRECTIVE heading
   const separatorIdx = result.indexOf("\n\n# STYLE DIRECTIVE");
   assert.ok(separatorIdx !== -1, "expected \\n\\n# before STYLE DIRECTIVE");
+});
+
+// ---------------------------------------------------------------------------
+// NativeWind kit — parallel stable prefix (classic prefix stays byte-identical)
+// ---------------------------------------------------------------------------
+
+test("STABLE_SYSTEM_PREFIX_NATIVEWIND is non-empty and contains key anchors", () => {
+  assert.ok(STABLE_SYSTEM_PREFIX_NATIVEWIND.length > 0);
+  assert.ok(STABLE_SYSTEM_PREFIX_NATIVEWIND.includes("Interstellar"));
+  assert.ok(STABLE_SYSTEM_PREFIX_NATIVEWIND.includes("Design System"));
+});
+
+test("STABLE_SYSTEM_PREFIX_NATIVEWIND does not contain volatile tokens (dates, IDs, placeholders)", () => {
+  assert.doesNotMatch(STABLE_SYSTEM_PREFIX_NATIVEWIND, /\d{4}-\d{2}-\d{2}/);
+  assert.doesNotMatch(STABLE_SYSTEM_PREFIX_NATIVEWIND, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i);
+  assert.doesNotMatch(STABLE_SYSTEM_PREFIX_NATIVEWIND, /\bTODO\b|\bFIXME\b/);
+});
+
+test("STABLE_SYSTEM_PREFIX_NATIVEWIND is byte-stable across evaluations and distinct from classic", () => {
+  assert.equal(STABLE_SYSTEM_PREFIX_NATIVEWIND, STABLE_SYSTEM_PREFIX_NATIVEWIND);
+  assert.notEqual(STABLE_SYSTEM_PREFIX_NATIVEWIND, STABLE_SYSTEM_PREFIX);
+});
+
+test("nativewind prefix speaks the shadcn dialect; classic prefix is untouched by it", () => {
+  for (const anchor of ["bg-background", "text-muted-foreground", "cn()", "lucide-react-native", "min-h-11"]) {
+    assert.ok(STABLE_SYSTEM_PREFIX_NATIVEWIND.includes(anchor), `nativewind prefix missing "${anchor}"`);
+    assert.ok(!STABLE_SYSTEM_PREFIX.includes(anchor), `classic prefix unexpectedly contains "${anchor}"`);
+  }
+});
+
+test("buildSystemBlocks selects the stable prefix by kit (classic default)", () => {
+  assert.equal(buildSystemBlocks({})[0].content, STABLE_SYSTEM_PREFIX);
+  assert.equal(buildSystemBlocks({ kit: "classic" })[0].content, STABLE_SYSTEM_PREFIX);
+  assert.equal(buildSystemBlocks({ kit: "nativewind" })[0].content, STABLE_SYSTEM_PREFIX_NATIVEWIND);
+});
+
+test("buildSystemBlocks per-kit: one block when volatile is empty, two when not", () => {
+  assert.equal(buildSystemBlocks({ kit: "nativewind" }).length, 1);
+  assert.equal(buildSystemBlocks({ kit: "nativewind", styleDirective: "Flight Manual" }).length, 2);
+  assert.equal(buildSystemBlocks({ kit: "classic" }).length, 1);
+  assert.equal(buildSystemBlocks({ kit: "classic", styleDirective: "Flight Manual" }).length, 2);
+});
+
+test("buildSystemBlocks nativewind block 0 is byte-identical across volatile inputs", () => {
+  const blocks1 = buildSystemBlocks({ kit: "nativewind", styleDirective: "Midnight" });
+  const blocks2 = buildSystemBlocks({ kit: "nativewind", planSection: "x: y" });
+  const blocks3 = buildSystemBlocks({ kit: "nativewind", isEdit: true, existingFiles: "- a.tsx (A)" });
+  assert.equal(blocks1[0].content, blocks2[0].content);
+  assert.equal(blocks1[0].content, blocks3[0].content);
+  assert.equal(blocks1[0].content, STABLE_SYSTEM_PREFIX_NATIVEWIND);
+});
+
+test("buildSystemBlocks nativewind blocks carry ephemeral cacheControl", () => {
+  const blocks = buildSystemBlocks({ kit: "nativewind", styleDirective: "Flight Manual" });
+  for (const block of blocks) {
+    const anthropic = (block.providerOptions as Record<string, unknown> | undefined)
+      ?.anthropic as Record<string, unknown> | undefined;
+    assert.ok(anthropic, "expected providerOptions.anthropic on every block");
+    assert.deepEqual(anthropic.cacheControl, { type: "ephemeral" });
+  }
+});
+
+test("buildVolatileSuffix edit mode is kit-parameterized (classic bytes unchanged)", () => {
+  const classicDefault = buildVolatileSuffix({ isEdit: true, existingFiles: "- app/index.tsx (Home)" });
+  const classicExplicit = buildVolatileSuffix({
+    kit: "classic",
+    isEdit: true,
+    existingFiles: "- app/index.tsx (Home)",
+  });
+  // kit absent and kit:"classic" must produce identical bytes (legacy edit cache lane).
+  assert.equal(classicDefault, classicExplicit);
+  assert.match(classicDefault, /Screen\.tsx, ui\.tsx, _layout\.tsx/);
+  assert.doesNotMatch(classicDefault, /components\/ui\/\*/);
+
+  const nativewind = buildVolatileSuffix({
+    kit: "nativewind",
+    isEdit: true,
+    existingFiles: "- app/index.tsx (Home)",
+  });
+  assert.match(nativewind, /EDIT MODE/);
+  assert.match(nativewind, /components\/ui\/\*/);
+  assert.match(nativewind, /never restyle the kit/);
+  assert.match(nativewind, /app\/index\.tsx/);
+  assert.doesNotMatch(nativewind, /ui\.tsx/);
+});
+
+test("buildInstructions selects the stable prefix by kit", () => {
+  assert.equal(buildInstructions({ kit: "nativewind" }), STABLE_SYSTEM_PREFIX_NATIVEWIND);
+  assert.equal(buildInstructions({ kit: "classic" }), STABLE_SYSTEM_PREFIX);
+  const result = buildInstructions({ kit: "nativewind", styleDirective: "Bold" });
+  assert.ok(result.startsWith(STABLE_SYSTEM_PREFIX_NATIVEWIND));
+  assert.ok(result.includes("\n\n# STYLE DIRECTIVE"));
 });

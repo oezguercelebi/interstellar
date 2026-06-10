@@ -13,6 +13,9 @@ const variantArg = v.object({
   effort: v.optional(v.string()),
   styleDirective: v.string(),
   userPrompt: v.optional(v.string()), // present on first-gen; absent on edits (plan step skipped)
+  // Starter kit stamped on the version row. Optional so in-flight workflow
+  // journals from before the kit field stay valid across the deploy; absent = classic.
+  kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
 });
 
 /**
@@ -37,7 +40,7 @@ export const generateApp = workflow.define({
         );
         await step.runAction(
           internal.preview.provisionPreview,
-          { versionId: variant.versionId },
+          { versionId: variant.versionId, kit: variant.kit },
           { name: `preview-v${i}` },
         );
       }),

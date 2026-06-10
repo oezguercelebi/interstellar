@@ -4,18 +4,22 @@
  * Daytona implementation of SandboxProvider.
  *
  * Fast path (primary): if DAYTONA_SNAPSHOT is set, create a sandbox from the
- * pre-baked snapshot (default name "interstellar-studio", built by
+ * pre-baked snapshot (e.g. "interstellar-studio-nw1", built by
  * scripts/bake-snapshot.mjs — node_modules already installed), upload the
  * generated source files, start Metro web, and return the preview URL.
  * Expected provision time: ~30-90s.
  *
  * Snapshot layout: SANDBOX_APP_ROOT (returned by getWorkDir()), with a
  * ROOT app/ directory as the Expo Router root — exactly what bake-snapshot.mjs
- * builds. Generated files (app/, components/, store/, theme/) upload 1:1 to the
- * project root, replacing the snapshot's placeholder screens.
+ * builds. Generated files (app/, components/, store/, theme/, lib/) upload 1:1
+ * to the project root, replacing the snapshot's placeholder screens; baked
+ * root config files (tailwind.config.js, global.css, babel/metro config,
+ * nativewind-env.d.ts) are never touched.
  *
  * Cold fallback: if DAYTONA_SNAPSHOT is not set, scaffold a fresh Expo Router
- * app with create-expo-app (slower, ~3-5 min, risks timeouts).
+ * app with create-expo-app (slower, ~3-5 min, risks timeouts). Classic kit
+ * only — NativeWind is never retrofitted into the cold path (provision throws
+ * immediately instead).
  *
  * NOTE on SDK conventions:
  *   - executeCommand(cmd, cwd, env, timeout) timeout is in SECONDS.
@@ -32,7 +36,7 @@
  */
 import { Daytona } from "@daytonaio/sdk";
 import { SANDBOX_APP_ROOT } from "./types";
-import type { AppFile, ExecResult, ProvisionResult, SandboxProvider } from "./types";
+import type { AppFile, ExecResult, ProvisionOpts, ProvisionResult, SandboxProvider } from "./types";
 
 const PREVIEW_PORT = 8081;
 
@@ -78,11 +82,22 @@ async function uploadFilesViaToolbox(
 export class DaytonaProvider implements SandboxProvider {
   readonly name = "daytona";
 
-  async provision(files: AppFile[]): Promise<ProvisionResult> {
+  async provision(files: AppFile[], opts?: ProvisionOpts): Promise<ProvisionResult> {
     const apiKey = process.env.DAYTONA_API_KEY;
     if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
     const snapshotName = process.env.DAYTONA_SNAPSHOT;
     const target = process.env.DAYTONA_TARGET; // e.g. "eu" — required for custom snapshots
+    const kit = opts?.kit ?? "classic";
+
+    // NativeWind apps require the pre-baked snapshot (babel/metro/tailwind
+    // config + node_modules are baked, never retrofitted into the cold path).
+    // Throw before creating anything so the caller records an actionable error
+    // instead of a 3-minute scaffold followed by a Metro resolve failure.
+    if (kit === "nativewind" && !snapshotName) {
+      throw new Error(
+        "NativeWind starter requires the pre-baked snapshot; set DAYTONA_SNAPSHOT or unset STARTER_KIT",
+      );
+    }
 
     const daytona = new Daytona({ apiKey, apiUrl: process.env.DAYTONA_API_URL });
 
@@ -102,6 +117,26 @@ export class DaytonaProvider implements SandboxProvider {
     // this snapshot where the actual user is `daytona` and the project lives at
     // SANDBOX_APP_ROOT.
     const proj = (await sandbox.getWorkDir()) ?? SANDBOX_APP_ROOT;
+
+    // ── KIT/SNAPSHOT FAIL-FAST GUARD ─────────────────────────────────────────
+    // A nativewind app on a snapshot without nativewind serves an HTTP-200
+    // Metro error overlay that waitForReady cannot distinguish from a healthy
+    // app (then burns a tsc-repair pass on unfixable config errors). Fail here,
+    // BEFORE upload/Metro, with an actionable message instead.
+    if (kit === "nativewind") {
+      const probe = await sandbox.process.executeCommand(
+        "test -d node_modules/nativewind && echo present || echo absent",
+        proj,
+        undefined,
+        10,
+      );
+      const out = probe.result ?? probe.artifacts?.stdout ?? "";
+      if (!String(out).includes("present")) {
+        throw new Error(
+          "snapshot lacks nativewind — re-bake (interstellar-studio-nw1) or unset STARTER_KIT",
+        );
+      }
+    }
 
     // ── SCAFFOLD (cold path only) ───────────────────────────────────────────
     if (!snapshotName) {
@@ -142,10 +177,11 @@ export class DaytonaProvider implements SandboxProvider {
     } else {
       // Snapshot path: the baked snapshot uses a ROOT app/ Expo Router layout
       // (see scripts/bake-snapshot.mjs). Remove the placeholder screens and any
-      // previously generated source dirs — including a legacy src/ tree —
-      // keeping node_modules, assets, and project config files intact.
+      // previously generated source dirs (app/ components/ store/ theme/ lib/)
+      // — including a legacy src/ tree — keeping node_modules, assets, and
+      // root project config files (incl. the baked NativeWind config) intact.
       await sandbox.process.executeCommand(
-        `rm -rf app components store theme src`,
+        `rm -rf app components store theme lib src`,
         proj,
         undefined,
         30,

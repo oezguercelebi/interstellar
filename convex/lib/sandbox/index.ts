@@ -12,7 +12,7 @@
 import { DaytonaProvider } from "./daytona";
 import type { SandboxProvider } from "./types";
 
-export type { AppFile, ProvisionResult, SandboxProvider } from "./types";
+export type { AppFile, ProvisionOpts, ProvisionResult, SandboxProvider } from "./types";
 
 /** The configured provider, or null when no sandbox credentials are set. */
 export function getSandboxProvider(): SandboxProvider | null {

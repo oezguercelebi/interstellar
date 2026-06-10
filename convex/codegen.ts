@@ -5,6 +5,7 @@ import type { Doc } from "./_generated/dataModel";
 import { makeAgent, makeCodegenTools } from "./agents/codegen";
 import { buildSystemBlocks } from "./agents/prompt";
 import { validateManifest } from "./lib/validate";
+import { formatPaletteTriplets } from "./lib/palette";
 import { effortProviderOptions, MODEL_SONNET } from "./lib/styles";
 import { repairFiles } from "./lib/webcompat";
 import { generateObject } from "ai";
@@ -13,51 +14,65 @@ import { z } from "zod";
 
 /**
  * Zod schema for the plan step. Kept compact — the model fills this in ~500 tokens.
+ * Built per kit (it lives in code, not the cached prompt): only the tab-icon
+ * vocabulary differs — Ionicons names for classic, lucide-react-native
+ * PascalCase names for nativewind.
  */
-const AppPlanSchema = z.object({
-  appName: z.string().describe("Short app name (2-4 words)"),
-  oneLiner: z.string().describe("One sentence describing the app"),
-  tabs: z
-    .array(
-      z.object({
-        name: z.string(),
-        icon: z.string().describe("Ionicons icon name, e.g. 'home' or 'search'"),
-        purpose: z.string().describe("One sentence: what this tab shows"),
-      }),
-    )
-    .min(2)
-    .max(4),
-  detailScreens: z
-    .array(
-      z.object({
-        route: z.string().describe("e.g. app/detail.tsx"),
-        purpose: z.string(),
-      }),
-    )
-    .max(3)
-    .optional(),
-  contentDomain: z.object({
-    description: z.string(),
-    seedItems: z
-      .array(z.string())
-      .min(5)
-      .max(8)
-      .describe("Realistic example content strings for this app"),
-  }),
-  palette: z.object({
-    mode: z.enum(["light", "dark"]),
-    background: z.string().describe("Hex color for the background"),
-    surface: z.string().describe("Hex color for cards/surfaces"),
-    textPrimary: z.string().describe("Hex color for primary text"),
-    accent: z.string().describe("Hex color for the primary accent"),
-    personality: z.string().describe("One-line design personality description"),
-  }),
-});
+const makeAppPlanSchema = (kit: "classic" | "nativewind") =>
+  z.object({
+    appName: z.string().describe("Short app name (2-4 words)"),
+    oneLiner: z.string().describe("One sentence describing the app"),
+    tabs: z
+      .array(
+        z.object({
+          name: z.string(),
+          icon: z
+            .string()
+            .describe(
+              kit === "nativewind"
+                ? "lucide-react-native icon name in PascalCase, e.g. 'House' or 'Search'"
+                : "Ionicons icon name, e.g. 'home' or 'search'",
+            ),
+          purpose: z.string().describe("One sentence: what this tab shows"),
+        }),
+      )
+      .min(2)
+      .max(4),
+    detailScreens: z
+      .array(
+        z.object({
+          route: z.string().describe("e.g. app/detail.tsx"),
+          purpose: z.string(),
+        }),
+      )
+      .max(3)
+      .optional(),
+    contentDomain: z.object({
+      description: z.string(),
+      seedItems: z
+        .array(z.string())
+        .min(5)
+        .max(8)
+        .describe("Realistic example content strings for this app"),
+    }),
+    palette: z.object({
+      mode: z.enum(["light", "dark"]),
+      background: z.string().describe("Hex color for the background"),
+      surface: z.string().describe("Hex color for cards/surfaces"),
+      textPrimary: z.string().describe("Hex color for primary text"),
+      accent: z.string().describe("Hex color for the primary accent"),
+      personality: z.string().describe("One-line design personality description"),
+    }),
+  });
 
-type AppPlan = z.infer<typeof AppPlanSchema>;
+type AppPlan = z.infer<ReturnType<typeof makeAppPlanSchema>>;
 
-/** Render the plan as readable YAML-ish text to inject into instructions. */
-function formatPlan(plan: AppPlan): string {
+/**
+ * Render the plan as readable YAML-ish text to inject into instructions.
+ * For nativewind-kit runs, append the exact HSL channel triplets so the agent
+ * copy-pastes them into theme/tokens.ts `c` — it must never hand-convert hex.
+ */
+function formatPlan(plan: AppPlan, kit: "classic" | "nativewind"): string {
   const tabs = plan.tabs
     .map((t) => `  - name: "${t.name}", icon: "${t.icon}", purpose: "${t.purpose}"`)
     .join("\n");
@@ -67,7 +82,7 @@ function formatPlan(plan: AppPlan): string {
         plan.detailScreens.map((d) => `  - route: "${d.route}", purpose: "${d.purpose}"`).join("\n")
       : "";
   const seeds = plan.contentDomain.seedItems.map((s) => `    - "${s}"`).join("\n");
-  return `appName: "${plan.appName}"
+  const base = `appName: "${plan.appName}"
 oneLiner: "${plan.oneLiner}"
 tabs:
 ${tabs}${details}
@@ -82,6 +97,8 @@ palette:
   textPrimary: "${plan.palette.textPrimary}"
   accent: "${plan.palette.accent}"
   personality: "${plan.palette.personality}"`;
+  if (kit !== "nativewind") return base;
+  return `${base}\n${formatPaletteTriplets(plan.palette)}`;
 }
 
 /**
@@ -99,8 +116,12 @@ export const runVariant = internalAction({
     styleDirective: v.string(),
     userPrompt: v.optional(v.string()), // present on first-gen; absent on edits (plan step skipped)
     isEdit: v.boolean(),
+    // Starter kit stamped on the version row; optional (absent = classic) so
+    // in-flight workflow journals stay valid across the deploy.
+    kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
   },
   handler: async (ctx, args): Promise<{ ok: boolean; fileCount: number }> => {
+    const kit = args.kit ?? "classic";
     await ctx.runMutation(internal.versions.patch, {
       versionId: args.versionId,
       status: "generating",
@@ -143,12 +164,12 @@ export const runVariant = internalAction({
 
         const { object: plan } = await generateObject({
           model: anthropic(MODEL_SONNET),
-          schema: AppPlanSchema,
+          schema: makeAppPlanSchema(kit),
           prompt: planPrompt,
           maxOutputTokens: 1500,
         });
 
-        planSection = formatPlan(plan);
+        planSection = formatPlan(plan, kit);
 
         // Persist plan JSON on the version row (additive, non-blocking).
         await ctx.runMutation(internal.versions.patch, {
@@ -171,8 +192,9 @@ export const runVariant = internalAction({
       isEdit: args.isEdit,
       existingFiles,
       planSection,
+      kit,
     });
-    const tools = makeCodegenTools(args.versionId);
+    const tools = makeCodegenTools(args.versionId, kit);
     const agent = makeAgent(args.model, tools);
 
     try {
@@ -222,7 +244,7 @@ export const runVariant = internalAction({
       files = await ctx.runQuery(internal.files.snapshot, { versionId: args.versionId });
     }
 
-    const { ok, problems } = validateManifest(files);
+    const { ok, problems } = validateManifest(files, kit);
     await ctx.runMutation(internal.versions.patch, {
       versionId: args.versionId,
       status: ok ? "ready" : "failed",

@@ -1,20 +1,32 @@
 /**
- * Seeded starter-kit files for first-generation versions.
+ * Starter-kit registry — seeded files for first-generation versions.
  *
- * These files are inserted into the `files` table before the agent runs so that:
+ * Kit files are inserted into the `files` table before the agent runs so that:
  *  1. Required-file validation passes immediately (tokens.ts, _layout.tsx, Screen.tsx).
  *  2. The agent can focus on product screens instead of infrastructure boilerplate.
  *  3. The model only rewrites the palette in tokens.ts and the tab list in _layout.tsx —
  *     the shapes are already correct and web-compatible.
  *
+ * Two kits:
+ *  - "classic"    — StyleSheet + theme/tokens.ts token objects (STARTER_FILES
+ *                   below; bytes frozen — pre-migration versions are stamped
+ *                   classic and keep this kit forever).
+ *  - "nativewind" — Tailwind/shadcn dialect, react-native-reusables-derived
+ *                   (./starterKitNativewind.ts). Requires the NativeWind-baked
+ *                   snapshot; selected per version via the STARTER_KIT env var
+ *                   read in projects.start (absent/unknown -> classic).
+ *
  * All files use only allowlisted deps and consume tokens exclusively (no literals).
  */
+import { STARTER_FILES_NATIVEWIND } from "./starterKitNativewind.ts";
 
 export interface StarterFile {
   path: string;
   contents: string;
   purpose: string;
 }
+
+export type StarterKitKey = "classic" | "nativewind";
 
 export const STARTER_FILES: StarterFile[] = [
   {
@@ -429,3 +441,8 @@ export default function RootLayout() {
 `,
   },
 ];
+
+export const STARTER_KITS: Record<StarterKitKey, { files: StarterFile[] }> = {
+  classic: { files: STARTER_FILES },
+  nativewind: { files: STARTER_FILES_NATIVEWIND },
+};

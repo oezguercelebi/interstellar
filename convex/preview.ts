@@ -27,8 +27,14 @@ import {
  * sandboxProvider:"none".
  */
 export const provisionPreview = internalAction({
-  args: { versionId: v.id("versions") },
-  handler: async (ctx, { versionId }) => {
+  args: {
+    versionId: v.id("versions"),
+    // Starter kit of the version (absent = classic). Passed by both callers —
+    // codegenWorkflow (variantArg.kit) and projects.reopenPreview (version row)
+    // — so no extra versions query is needed here.
+    kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
+  },
+  handler: async (ctx, { versionId, kit }) => {
     const provider = getSandboxProvider();
 
     // Short-circuit if no sandbox credentials.
@@ -61,6 +67,7 @@ export const provisionPreview = internalAction({
     try {
       const { sandboxId, previewUrl } = await provider.provision(
         files.map((f) => ({ path: f.path, contents: f.contents })),
+        { kit },
       );
 
       // Persist the sandbox info immediately so the UI can show a "loading" state.

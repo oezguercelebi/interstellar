@@ -63,9 +63,16 @@ export function makeAgent(
  * versionId so its handler can write to the right file set. Code exits ONLY
  * through these — which is what makes generation streamable, durable and resumable.
  *
+ * `kit` selects the validator rule set finalize self-heals against (classic
+ * StyleSheet rules vs nativewind className rules); it must match the kit the
+ * version was seeded with.
+ *
  * (Agent v0.6: tools use `inputSchema` + `execute(ctx, input)`.)
  */
-export function makeCodegenTools(versionId: Id<"versions">) {
+export function makeCodegenTools(
+  versionId: Id<"versions">,
+  kit: "classic" | "nativewind" = "classic",
+) {
   const writeFile = createTool({
     description:
       "Write a complete source file to the app. Provide the full final contents — never a diff or placeholder.",
@@ -98,7 +105,7 @@ export function makeCodegenTools(versionId: Id<"versions">) {
     }),
     execute: async (ctx: ToolCtx, { summary, entryScreens }): Promise<string> => {
       const files = await ctx.runQuery(internal.files.snapshot, { versionId });
-      const { ok, problems } = validateManifest(files);
+      const { ok, problems } = validateManifest(files, kit);
       if (!ok) {
         return `NOT READY — fix these and call finalize again:\n- ${problems.join("\n- ")}`;
       }

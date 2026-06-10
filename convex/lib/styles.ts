@@ -75,13 +75,13 @@ export const THEMES: ThemeSpec[] = [
     key: "midnight",
     name: "Midnight",
     directive:
-      "Midnight Pro: DARK — bg #0E0E11, surface #18181D, surfaceAlt #202028, border #26262C, text #F5F5F7, textDim #A0A0AB, accent #7C8CF8 (indigo), glowing soft shadows, sleek and premium.",
+      "Midnight Pro: DARK — bg #0E0E11, surface #18181D, elevated card #202028, border #26262C, text #F5F5F7, secondary text #A0A0AB, accent #7C8CF8 (indigo), glowing soft shadows, sleek and premium.",
   },
   {
     key: "playful",
     name: "Vivid Playful",
     directive:
-      "Vivid Playful: accent #FF6B4A, large radii (radius.xl everywhere), bold confident gradients, energetic and friendly, generous rounded shapes.",
+      "Vivid Playful: accent #FF6B4A, large radii (the largest corner-radius step everywhere), bold confident gradients, energetic and friendly, generous rounded shapes.",
   },
   {
     key: "mono",
