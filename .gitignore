@@ -28,6 +28,7 @@ next-env.d.ts
 
 # scratch / iteration artifacts
 .scratch/
+.tm/
 docs/shots/
 docs/_*.txt
 
