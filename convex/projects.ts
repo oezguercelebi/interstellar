@@ -15,7 +15,7 @@ import {
   themeName,
 } from "./lib/styles";
 import { validateManifest } from "./lib/validate";
-import { STARTER_FILES } from "./agents/starterKit";
+import { STARTER_KITS } from "./agents/starterKit";
 
 const DEMO_USER = "demo";
 
@@ -38,6 +38,14 @@ export const start = mutation({
     const model = modelArg && isModelId(modelArg) ? modelArg : DEFAULT_MODEL;
     const effort = supportsEffort(model) ? effortArg : undefined;
     const theme = themeArg && isThemeKey(themeArg) ? themeArg : DEFAULT_THEME;
+    // Starter kit: env-driven activation, read at HANDLER time (never module
+    // top-level). Absent/unknown STARTER_KIT = classic, so `npx convex dev`
+    // auto-pushes can never flip the kit by accident.
+    const kitEnv = process.env.STARTER_KIT;
+    if (kitEnv && kitEnv !== "classic" && kitEnv !== "nativewind") {
+      console.warn(`Unknown STARTER_KIT value "${kitEnv}" — falling back to classic`);
+    }
+    const kit = kitEnv === "nativewind" ? ("nativewind" as const) : ("classic" as const);
     const specs = pickVariants(variants);
     const projectId = await ctx.db.insert("projects", {
       userId: DEMO_USER,
@@ -63,6 +71,7 @@ export const start = mutation({
         styleKey: theme,
         styleName: themeName(theme),
         theme,
+        kit,
         status: "pending",
         model,
         effort,
@@ -74,7 +83,7 @@ export const start = mutation({
       // Only for first generation — edits clone the parent's files instead.
       await ctx.runMutation(internal.files.seedStarter, {
         versionId,
-        files: STARTER_FILES,
+        files: STARTER_KITS[kit].files,
       });
 
       variantArgs.push({
@@ -85,6 +94,7 @@ export const start = mutation({
         effort,
         styleDirective: directive,
         userPrompt: prompt,
+        kit,
       });
     }
 
@@ -148,7 +158,10 @@ export const inspect = query({
         .collect();
       const live = files.filter((f) => !f.deleted);
       activeFileCount = live.length;
-      validate = validateManifest(live.map((f) => ({ path: f.path, contents: f.contents })));
+      validate = validateManifest(
+        live.map((f) => ({ path: f.path, contents: f.contents })),
+        active.kit, // absent on pre-migration rows → classic rules
+      );
     }
 
     return {
@@ -201,7 +214,10 @@ export const reopenPreview = mutation({
       previewAt: undefined,
       error: undefined,
     });
-    await ctx.scheduler.runAfter(0, internal.preview.provisionPreview, { versionId });
+    await ctx.scheduler.runAfter(0, internal.preview.provisionPreview, {
+      versionId,
+      kit: version.kit, // stamped at creation; absent (pre-migration) = classic
+    });
   },
 });
 
@@ -344,6 +360,9 @@ export const edit = mutation({
       styleKey: parent.styleKey,
       styleName: parent.styleName,
       theme,
+      // Edits inherit the parent's kit FOREVER — pre-migration projects keep
+      // the classic prompt + validator regardless of the STARTER_KIT env.
+      kit: parent.kit,
       status: "pending",
       model,
       effort,
@@ -360,7 +379,7 @@ export const edit = mutation({
     const workflowId = await workflow.start(ctx, internal.codegenWorkflow.generateApp, {
       projectId,
       variants: [
-        { versionId, threadId, promptMessageId: messageId, model, effort, styleDirective: themeDirective(theme, { index: 0, count: 1 }) },
+        { versionId, threadId, promptMessageId: messageId, model, effort, styleDirective: themeDirective(theme, { index: 0, count: 1 }), kit: parent.kit },
       ],
       isEdit: true,
     });

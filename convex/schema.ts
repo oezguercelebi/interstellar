@@ -36,6 +36,9 @@ export default defineSchema({
     styleKey: v.string(), // theme key: auto | signature | editorial | midnight | playful | mono
     styleName: v.string(),
     theme: v.optional(v.string()), // chosen design theme (see lib/styles THEMES)
+    // Starter kit stamped at creation; absent = "classic" (every pre-migration
+    // row). Edits inherit the parent's kit, so env flips never affect old projects.
+    kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
     status: versionStatus,
     model: v.string(),
     effort: v.optional(v.string()), // Opus only: low | medium | high
