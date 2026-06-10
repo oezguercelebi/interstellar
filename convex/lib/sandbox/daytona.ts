@@ -4,7 +4,7 @@
  * Daytona implementation of SandboxProvider.
  *
  * Fast path (primary): if DAYTONA_SNAPSHOT is set, create a sandbox from the
- * pre-baked snapshot (default name "interstellar-studio", built by
+ * pre-baked snapshot (e.g. "interstellar-studio-nw1", built by
  * scripts/bake-snapshot.mjs — node_modules already installed), upload the
  * generated source files, start Metro web, and return the preview URL.
  * Expected provision time: ~30-90s.
