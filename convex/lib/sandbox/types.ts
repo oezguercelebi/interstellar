@@ -24,6 +24,13 @@ export interface ProvisionResult {
   previewUrl: string;
 }
 
+/** Result of a sandboxed command execution. */
+export interface ExecResult {
+  exitCode: number;
+  /** Combined stdout (and stderr, depending on the provider). */
+  output: string;
+}
+
 export interface SandboxProvider {
   /** Stored on versions.sandboxProvider; the UI keys proxy behavior off it. */
   readonly name: string;
@@ -34,4 +41,21 @@ export interface SandboxProvider {
    * caller records the error on the version.
    */
   provision(files: AppFile[]): Promise<ProvisionResult>;
+
+  /**
+   * Execute a shell command inside an existing sandbox.
+   * Optional — providers that don't implement this return undefined.
+   * timeoutSeconds is in seconds (Daytona SDK convention).
+   */
+  exec?(
+    sandboxId: string,
+    command: string,
+    opts?: { cwd?: string; timeoutSeconds?: number },
+  ): Promise<ExecResult>;
+
+  /**
+   * Upload (or overwrite) a set of files into an existing sandbox.
+   * Optional — providers that don't implement this return undefined.
+   */
+  uploadFiles?(sandboxId: string, files: AppFile[], projectRoot: string): Promise<void>;
 }

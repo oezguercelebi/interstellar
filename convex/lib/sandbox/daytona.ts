@@ -29,9 +29,48 @@
  * "use node" actions (convex/preview.ts).
  */
 import { Daytona } from "@daytonaio/sdk";
-import type { AppFile, ProvisionResult, SandboxProvider } from "./types";
+import type { AppFile, ExecResult, ProvisionResult, SandboxProvider } from "./types";
 
 const PREVIEW_PORT = 8081;
+
+// ── Shared upload helper ─────────────────────────────────────────────────────
+
+/**
+ * Upload files into a running Daytona sandbox via the toolbox REST API using
+ * the base64-sidecar strategy (see module-level comment for why).
+ * `toolboxBase` is `<toolboxProxyUrl>/<sandboxId>`.
+ */
+async function uploadFilesViaToolbox(
+  sandbox: { process: { executeCommand: (cmd: string, cwd?: string, env?: Record<string, string>, timeout?: number) => Promise<unknown> } },
+  toolboxBase: string,
+  authHeader: string,
+  proj: string,
+  files: AppFile[],
+): Promise<void> {
+  for (const f of files) {
+    const destPath = `${proj}/${f.path}`;
+    const b64 = Buffer.from(f.contents, "utf8").toString("base64");
+    const form = new FormData();
+    form.append("file", new Blob([b64], { type: "text/plain" }), `${f.path}.b64`);
+    const uploadUrl = `${toolboxBase}/files/upload?path=${encodeURIComponent(`${destPath}.b64`)}`;
+    const res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { Authorization: authHeader },
+      body: form,
+    });
+    if (!res.ok) {
+      throw new Error(`File upload failed for ${f.path}: ${res.status} ${await res.text()}`);
+    }
+  }
+
+  // Decode every *.b64 back to its real file, then remove sidecars.
+  await (sandbox.process.executeCommand as (cmd: string, cwd?: string, env?: Record<string, string>, timeout?: number) => Promise<unknown>)(
+    `cd ${proj} && find . -name '*.b64' -print0 | while IFS= read -r -d '' b; do base64 --decode "$b" > "${"${b%.b64}"}" && rm -f "$b"; done ; echo decoded`,
+    proj,
+    undefined,
+    60,
+  );
+}
 
 export class DaytonaProvider implements SandboxProvider {
   readonly name = "daytona";
@@ -123,31 +162,7 @@ export class DaytonaProvider implements SandboxProvider {
     // `base64 -d`. Uploading raw UTF-8 through the multipart endpoint mangles
     // multibyte characters (emoji, middle-dots) into mojibake; base64 is immune
     // to any charset/locale handling along the way, so emoji survive intact.
-    for (const f of files) {
-      const relPath = f.path;
-      const destPath = `${proj}/${relPath}`;
-      const b64 = Buffer.from(f.contents, "utf8").toString("base64");
-      const form = new FormData();
-      form.append("file", new Blob([b64], { type: "text/plain" }), `${relPath}.b64`);
-      const uploadUrl = `${toolboxBase}/files/upload?path=${encodeURIComponent(`${destPath}.b64`)}`;
-      const res = await fetch(uploadUrl, {
-        method: "POST",
-        headers: { Authorization: authHeader },
-        body: form,
-      });
-      if (!res.ok) {
-        throw new Error(`File upload failed for ${relPath}: ${res.status} ${await res.text()}`);
-      }
-    }
-
-    // Decode every uploaded *.b64 back to its real file (byte-exact, UTF-8 safe),
-    // then remove the base64 sidecars.
-    await sandbox.process.executeCommand(
-      `cd ${proj} && find . -name '*.b64' -print0 | while IFS= read -r -d '' b; do base64 --decode "$b" > "${"${b%.b64}"}" && rm -f "$b"; done ; echo decoded`,
-      proj,
-      undefined,
-      60,
-    );
+    await uploadFilesViaToolbox(sandbox, toolboxBase, authHeader, proj, files);
 
     // ── START METRO (detached) ───────────────────────────────────────────────
     // Run Metro (Expo web dev server) in a background subshell; it keeps hot
@@ -167,5 +182,45 @@ export class DaytonaProvider implements SandboxProvider {
     const url = typeof preview === "string" ? preview : preview.url;
 
     return { sandboxId: sandbox.id, previewUrl: url };
+  }
+
+  /**
+   * Execute a shell command in an existing Daytona sandbox.
+   * Reattaches to the sandbox by ID via `daytona.get(sandboxId)`.
+   * timeoutSeconds is forwarded to executeCommand (Daytona SDK uses seconds).
+   */
+  async exec(
+    sandboxId: string,
+    command: string,
+    opts?: { cwd?: string; timeoutSeconds?: number },
+  ): Promise<ExecResult> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
+    const daytona = new Daytona({ apiKey, apiUrl: process.env.DAYTONA_API_URL });
+    const sandbox = await daytona.get(sandboxId);
+    const resp = await sandbox.process.executeCommand(
+      command,
+      opts?.cwd,
+      undefined,
+      opts?.timeoutSeconds,
+    );
+    return {
+      exitCode: resp.exitCode,
+      output: resp.result ?? resp.artifacts?.stdout ?? "",
+    };
+  }
+
+  /**
+   * Upload files into an existing Daytona sandbox, decoding them in-place.
+   * Uses the same base64-sidecar strategy as provision().
+   */
+  async uploadFiles(sandboxId: string, files: AppFile[], projectRoot: string): Promise<void> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
+    const daytona = new Daytona({ apiKey, apiUrl: process.env.DAYTONA_API_URL });
+    const sandbox = await daytona.get(sandboxId);
+    const toolboxBase = `${(sandbox as unknown as { toolboxProxyUrl: string }).toolboxProxyUrl}/${sandbox.id}`;
+    const authHeader = `Bearer ${apiKey}`;
+    await uploadFilesViaToolbox(sandbox, toolboxBase, authHeader, projectRoot, files);
   }
 }
