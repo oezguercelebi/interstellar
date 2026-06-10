@@ -1,24 +1,60 @@
 import { Agent, createTool, type ToolCtx } from "@convex-dev/agent";
 import { anthropic } from "@ai-sdk/anthropic";
 import { stepCountIs } from "ai";
+import type { AnthropicMessageMetadata } from "@ai-sdk/anthropic";
+import type { ProviderMetadata } from "ai";
 import { z } from "zod";
 import { components, internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { validateManifest } from "../lib/validate";
 
-/** Build a codegen agent for a given model + system instructions + tools. */
+/**
+ * Extract and log Anthropic prompt-cache token counts from a step's
+ * providerMetadata. Fields surface under `providerMetadata.anthropic` as
+ * defined by `AnthropicMessageMetadata` in `@ai-sdk/anthropic`.
+ */
+function logCacheUsage(providerMetadata: ProviderMetadata | undefined): void {
+  if (!providerMetadata) return;
+  const meta = providerMetadata.anthropic as unknown as AnthropicMessageMetadata | undefined;
+  if (!meta) return;
+  // `usage` is typed as JSONObject on AnthropicMessageMetadata; cast to access fields.
+  const usage = meta.usage as Record<string, number> | undefined;
+  const cacheWrite =
+    meta.cacheCreationInputTokens ??
+    (usage?.cache_creation_input_tokens ?? 0);
+  const cacheRead = usage?.cache_read_input_tokens ?? 0;
+  const uncached = usage?.input_tokens ?? 0;
+  console.log(
+    `[cache] write=${cacheWrite} read=${cacheRead} uncached=${uncached}`,
+  );
+}
+
+/**
+ * Build a codegen agent for a given model and tools.
+ *
+ * System instructions are intentionally NOT set here; instead they are
+ * passed as `system` on each `streamText` call so we can attach
+ * Anthropic cache-control breakpoints (see `buildSystemBlocks` in prompt.ts).
+ * Passing the system per-call lets the stable prefix carry a breakpoint that
+ * caches tools + system together, and a second breakpoint covers the volatile
+ * suffix across all 48 sequential steps within a run.
+ */
 export function makeAgent(
   model: string,
-  instructions: string,
   tools: ReturnType<typeof makeCodegenTools>,
 ) {
   return new Agent(components.agent, {
     name: "Interstellar Codegen",
     languageModel: anthropic(model),
-    instructions,
     tools,
     // Allow many writeFile calls + a finalize self-heal loop in a single turn.
     stopWhen: stepCountIs(48),
+    usageHandler: (_ctx, { providerMetadata }) => {
+      // Log Anthropic prompt-cache usage for every step so cache hits are
+      // visible in Convex logs. `usageHandler` receives `providerMetadata`
+      // which includes `anthropic.cacheCreationInputTokens` / `usage` fields.
+      logCacheUsage(providerMetadata);
+    },
   });
 }
 

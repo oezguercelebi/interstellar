@@ -1,4 +1,5 @@
-import { HOUSE_DESIGN_SYSTEM } from "./designSystem";
+import type { SystemModelMessage } from "ai";
+import { HOUSE_DESIGN_SYSTEM } from "./designSystem.ts";
 
 /**
  * Core role, output contract, and hard constraints for the codegen agent.
@@ -6,6 +7,15 @@ import { HOUSE_DESIGN_SYSTEM } from "./designSystem";
  * Stable content (SYSTEM_PROMPT + HOUSE_DESIGN_SYSTEM) comes first in the
  * parts array so it forms a cacheable prefix. Volatile content (style directive,
  * app plan, edit section) is appended after.
+ *
+ * Prompt-caching layout (Anthropic):
+ *   Block 1 (stable) — SYSTEM_PROMPT + HOUSE_DESIGN_SYSTEM, with a
+ *     cache_control breakpoint. Caches tools + stable system together.
+ *     Shared across all steps of a run, all 3 parallel variants, and all
+ *     runs on the same model as long as the byte content doesn't change.
+ *   Block 2 (volatile) — style directive / plan / edit context, with a
+ *     second cache_control breakpoint. Re-read cheaply across the up-to-48
+ *     steps within a single variant run.
  */
 export const SYSTEM_PROMPT = `You are Interstellar — an elite mobile product designer and React Native engineer.
 You turn an app concept into a COMPLETE, runnable, genuinely beautiful Expo Router app.
@@ -79,6 +89,9 @@ react-native-gesture-handler, @expo/vector-icons, @react-navigation/native,
 NEVER create or modify: package.json, app.json, tsconfig.json, babel.config.js,
 metro.config.js, .env*, any native android/ios files.`;
 
+/** The byte-stable system prefix shared across all runs and variants. */
+export const STABLE_SYSTEM_PREFIX = `${SYSTEM_PROMPT}\n\n${HOUSE_DESIGN_SYSTEM}`;
+
 export interface BuildInstructionsOpts {
   styleDirective?: string;
   isEdit?: boolean;
@@ -86,15 +99,18 @@ export interface BuildInstructionsOpts {
   planSection?: string;   // formatted APP PLAN from the plan step (first-gen only)
 }
 
-/** Assemble the full system instructions for one generation/edit run. */
-export function buildInstructions({
+/**
+ * Build the volatile suffix that goes after the stable prefix. Returns an
+ * empty string when there is no run-specific context (e.g. plain edit with
+ * no style directive and no plan).
+ */
+export function buildVolatileSuffix({
   styleDirective,
   isEdit,
   existingFiles,
   planSection,
 }: BuildInstructionsOpts): string {
-  // Stable prefix first (maximises prompt-cache hit rate).
-  const parts = [SYSTEM_PROMPT, HOUSE_DESIGN_SYSTEM];
+  const parts: string[] = [];
 
   // Volatile: style directive
   if (styleDirective) {
@@ -124,4 +140,53 @@ ${existingFiles ?? "(none)"}`,
   }
 
   return parts.join("\n\n");
+}
+
+/**
+ * Build the system prompt as two `SystemModelMessage` blocks with Anthropic
+ * cache-control breakpoints.
+ *
+ *   Block 1 (stable)   — SYSTEM_PROMPT + HOUSE_DESIGN_SYSTEM with an ephemeral
+ *                         breakpoint. Caches tools + stable system together across
+ *                         all variants and runs on the same model.
+ *   Block 2 (volatile) — Style directive / APP PLAN / edit context with a second
+ *                         ephemeral breakpoint. Re-read cheaply across the up-to-48
+ *                         sequential steps within a single run. Omitted when there
+ *                         is no volatile content.
+ *
+ * The returned array is typed as `SystemModelMessage[]` so it can be passed
+ * directly to `streamText`'s `system` parameter. TypeScript requires a cast at
+ * the call site because `@convex-dev/agent`'s `AgentPrompt.system` is declared
+ * as `string`; the AI SDK runtime and the Anthropic provider accept the array.
+ */
+export function buildSystemBlocks(opts: BuildInstructionsOpts): SystemModelMessage[] {
+  const cacheBreakpoint = { anthropic: { cacheControl: { type: "ephemeral" as const } } };
+
+  const blocks: SystemModelMessage[] = [
+    {
+      role: "system" as const,
+      content: STABLE_SYSTEM_PREFIX,
+      providerOptions: cacheBreakpoint,
+    },
+  ];
+
+  const volatile = buildVolatileSuffix(opts);
+  if (volatile) {
+    blocks.push({
+      role: "system" as const,
+      content: volatile,
+      providerOptions: cacheBreakpoint,
+    });
+  }
+
+  return blocks;
+}
+
+/**
+ * @deprecated Use `buildSystemBlocks` for prompt-cached requests.
+ * Kept for backwards-compatibility with any code that still needs a flat string.
+ */
+export function buildInstructions(opts: BuildInstructionsOpts): string {
+  const volatile = buildVolatileSuffix(opts);
+  return volatile ? `${STABLE_SYSTEM_PREFIX}\n\n${volatile}` : STABLE_SYSTEM_PREFIX;
 }

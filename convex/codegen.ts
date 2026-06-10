@@ -3,7 +3,7 @@ import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { makeAgent, makeCodegenTools } from "./agents/codegen";
-import { buildInstructions } from "./agents/prompt";
+import { buildSystemBlocks } from "./agents/prompt";
 import { validateManifest } from "./lib/validate";
 import { effortProviderOptions, MODEL_SONNET } from "./lib/styles";
 import { repairFiles } from "./lib/webcompat";
@@ -161,22 +161,35 @@ export const runVariant = internalAction({
       }
     }
 
-    const instructions = buildInstructions({
+    // Build the system prompt as two cache-annotated blocks:
+    //   Block 1 (stable)  — SYSTEM_PROMPT + HOUSE_DESIGN_SYSTEM, cached across all
+    //                        variants and runs on this model.
+    //   Block 2 (volatile) — style directive / plan / edit context, cached across
+    //                        all sequential steps of THIS run only.
+    const systemBlocks = buildSystemBlocks({
       styleDirective: args.styleDirective,
       isEdit: args.isEdit,
       existingFiles,
       planSection,
     });
     const tools = makeCodegenTools(args.versionId);
-    const agent = makeAgent(args.model, instructions, tools);
+    const agent = makeAgent(args.model, tools);
 
     try {
       // Opus 4.8 supports adaptive-thinking effort; other models reject it, so
       // effortProviderOptions returns undefined and we omit providerOptions.
-      const providerOptions = effortProviderOptions(args.model, args.effort);
+      const effortOpts = effortProviderOptions(args.model, args.effort);
+
+      // `AgentPrompt.system` is typed as `string` in @convex-dev/agent, but the
+      // AI SDK and the Anthropic provider accept `SystemModelMessage[]` at runtime.
+      // The cast is safe: the array flows through startGeneration unchanged and
+      // lands as the `system` param of AI SDK's streamText.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const genOpts: any = { promptMessageId: args.promptMessageId };
-      if (providerOptions) genOpts.providerOptions = providerOptions;
+      const genOpts: any = {
+        promptMessageId: args.promptMessageId,
+        system: systemBlocks,
+        ...(effortOpts ? { providerOptions: effortOpts } : {}),
+      };
       const result = await agent.streamText(
         ctx,
         { threadId: args.threadId },
