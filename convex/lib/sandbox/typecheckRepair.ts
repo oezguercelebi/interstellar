@@ -53,6 +53,12 @@ export const FORBIDDEN_PATHS = new Set([
   "metro.config.ts",
   "expo.config.js",
   "expo.config.ts",
+  // NativeWind snapshot infra — baked once, never repaired.
+  "tailwind.config.js",
+  "tailwind.config.ts",
+  "global.css",
+  "nativewind-env.d.ts",
+  "postcss.config.js",
 ]);
 
 // ── tsc output parsing ────────────────────────────────────────────────────────

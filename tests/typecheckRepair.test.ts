@@ -171,3 +171,15 @@ test("FORBIDDEN_PATHS contains all expected infra files", () => {
     assert.ok(FORBIDDEN_PATHS.has(p), `expected FORBIDDEN_PATHS to include ${p}`);
   }
 });
+
+test("FORBIDDEN_PATHS includes the NativeWind snapshot infra files", () => {
+  for (const p of [
+    "tailwind.config.js",
+    "tailwind.config.ts",
+    "global.css",
+    "nativewind-env.d.ts",
+    "postcss.config.js",
+  ]) {
+    assert.ok(FORBIDDEN_PATHS.has(p), `expected FORBIDDEN_PATHS to include ${p}`);
+  }
+});
