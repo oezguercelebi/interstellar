@@ -16,8 +16,10 @@ of these rules. Gate after every change: `npm run typecheck && npm run test:pure
 
 ## Rule 1 — ZERO-REGENERATION
 
-`convex/_generated/` is **committed and load-bearing** for `next build`; `npx convex codegen`
-is **broken locally** (dotenv/node-builtins esbuild failure in component bundling). Therefore:
+`convex/_generated/` is **committed and load-bearing** for `next build` (CI/Vercel run no
+codegen step). `npx convex codegen` works locally again since the sandbox module got its
+`"use node"` directives (it was broken before that — see Rule 4); regenerate CONSCIOUSLY
+and commit the diff, never let it drift. Therefore:
 
 - Never move/rename a convex entry file (the 10: schema, convex.config, projects, files,
   versions, studio, testHelpers, codegen, codegenWorkflow, preview).
