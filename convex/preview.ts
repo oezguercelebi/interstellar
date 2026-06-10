@@ -33,14 +33,36 @@ export const provisionPreview = internalAction({
     // codegenWorkflow (variantArg.kit) and projects.reopenPreview (version row)
     // — so no extra versions query is needed here.
     kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
+    // Sandbox id of THIS version's prior provision, passed by reopenPreview so we
+    // can free its quota before booting the replacement (Daytona's idle auto-stop
+    // is ~30 min — long enough that stacked reopens exhaust the disk limit).
+    // Absent on first-gen/edit: those versions have no prior sandbox.
+    previousSandboxId: v.optional(v.string()),
   },
-  handler: async (ctx, { versionId, kit }) => {
+  handler: async (ctx, { versionId, kit, previousSandboxId }) => {
     const provider = getSandboxProvider();
 
     // Short-circuit if no sandbox credentials.
     if (!provider) {
       await ctx.runMutation(internal.versions.patch, { versionId, sandboxProvider: "none" });
       return;
+    }
+
+    // Free this version's previous sandbox BEFORE provisioning its replacement,
+    // so the two don't both count against the disk/CPU quota. Best-effort: a
+    // failed teardown must never block the new preview — the orphan still
+    // auto-stops on its own. reopenPreview has already cleared the stale URL, so
+    // there's nothing live to protect here.
+    if (previousSandboxId && provider.delete) {
+      try {
+        await provider.delete(previousSandboxId);
+        console.log(`provisionPreview: freed prior sandbox ${previousSandboxId}`);
+      } catch (err) {
+        console.warn(
+          `provisionPreview: could not free prior sandbox ${previousSandboxId} (non-fatal):`,
+          String(err).slice(0, 200),
+        );
+      }
     }
 
     // Fetch the generated files for this version.

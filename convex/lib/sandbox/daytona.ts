@@ -277,6 +277,30 @@ export class DaytonaProvider implements SandboxProvider {
       60,
     );
   }
+
+  /**
+   * Delete a sandbox to reclaim its disk/CPU quota right away. Daytona's idle
+   * auto-stop is ~30 min — long enough that rapid reopens stack orphaned
+   * sandboxes and exhaust the org's disk limit.
+   *
+   * Uses the toolbox REST DELETE directly rather than the SDK's
+   * get(id) + sandbox.delete(): get(id) has been observed to throw spurious
+   * NotFound for live sandboxes, and the one-hop REST call is both faster and
+   * what scripts/lib/sandboxLifecycle.mjs already relies on. A 404 means the
+   * sandbox is already gone — treated as success.
+   */
+  async delete(sandboxId: string): Promise<void> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
+    const apiBase = process.env.DAYTONA_API_URL ?? "https://app.daytona.io/api";
+    const res = await fetch(`${apiBase}/sandbox/${sandboxId}?force=true`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Sandbox delete failed for ${sandboxId}: ${res.status} ${await res.text()}`);
+    }
+  }
 }
 
 /** Detached Metro launch (shared by provision + restartDevServer). */

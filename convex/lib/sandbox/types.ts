@@ -87,4 +87,14 @@ export interface SandboxProvider {
    * NativeWind Metro pipeline. Optional.
    */
   restartDevServer?(sandboxId: string, projectRoot: string): Promise<void>;
+
+  /**
+   * Delete a sandbox and free its quota immediately, instead of waiting for the
+   * platform's idle auto-stop. Called when a version's preview is being replaced
+   * (see provisionPreview's previousSandboxId teardown) so the old and new
+   * sandboxes don't both count against the disk/CPU limit. Optional — providers
+   * without it leave cleanup to idle auto-stop. Deleting an already-gone sandbox
+   * is a no-op, not an error.
+   */
+  delete?(sandboxId: string): Promise<void>;
 }

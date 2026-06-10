@@ -217,6 +217,9 @@ export const reopenPreview = mutation({
     await ctx.scheduler.runAfter(0, internal.preview.provisionPreview, {
       versionId,
       kit: version.kit, // stamped at creation; absent (pre-migration) = classic
+      // Captured before re-provision: provisionPreview deletes it so the old and
+      // new sandboxes don't both count against the disk quota during the reopen.
+      previousSandboxId: version.sandboxId,
     });
   },
 });
