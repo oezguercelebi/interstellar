@@ -1,0 +1,12 @@
+import { Daytona } from "@daytonaio/sdk";
+import fs from "fs";
+const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const g = (k) => (env.match(new RegExp(`^${k}=(.*)$`, "m")) || [])[1]?.trim();
+const sb = await new Daytona({ apiKey: g("DAYTONA_API_KEY"), apiUrl: g("DAYTONA_API_URL") }).get(process.argv[2]);
+const ex = async (c) => ((await sb.process.executeCommand(c, "/home/daytona", undefined, 30)).result ?? "").toString().trim();
+console.log("workdir:", await sb.getWorkDir().catch(() => "?"));
+console.log("ROOT app/:", await ex("ls /home/daytona/expo-app/app 2>&1 | head"));
+console.log("ROOT src/app/:", await ex("ls /home/daytona/expo-app/src/app 2>&1 | head"));
+console.log("app.json router/web:", await ex("cat /home/daytona/expo-app/app.json 2>&1 | python3 -c \"import sys,json;j=json.load(sys.stdin);print('web=',j['expo'].get('web'),'plugins=',[p if isinstance(p,str) else p[0] for p in j['expo'].get('plugins',[])])\" 2>&1 || cat /home/daytona/expo-app/app.json"));
+console.log("expo-router version:", await ex("cat /home/daytona/expo-app/node_modules/expo-router/package.json 2>&1 | grep '\\\"version\\\"' | head -1"));
+console.log("serve installed:", await ex("which serve || ls /home/daytona/expo-app/node_modules/.bin/serve 2>&1"));

@@ -1,0 +1,134 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Interstellar design system — "Flight Manual".
+  :root   → light "paper" surface (the printed manual: landing)
+  .dark   → dark "console" surface (mission control: studio)
+  Accent across both → Signal #FF4D00 (International Orange), flat, never gradient.
+  Structure = hairlines. Elevation = true shadow. Decoration that doesn't inform is removed.
+*/
+
+@layer base {
+  :root {
+    --background: 45 20% 95%; /* #F5F4F0 paper */
+    --foreground: 216 10% 10%; /* #16181B ink */
+    --card: 45 25% 98%; /* #FCFBF8 */
+    --card-foreground: 216 10% 10%;
+    --muted: 45 12% 91%;
+    --muted-foreground: 216 6% 40%;
+    --primary: 18 100% 50%; /* #FF4D00 signal */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 12% 91%;
+    --secondary-foreground: 216 10% 10%;
+    --accent: 18 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --border: 45 8% 86%;
+    --input: 45 8% 84%;
+    --ring: 18 100% 50%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 220 13% 5%; /* #0A0B0D void */
+    --foreground: 45 27% 94%; /* #F4F2EC starlight */
+    --card: 220 16% 7%; /* #101216 panel */
+    --card-foreground: 45 27% 94%;
+    --muted: 220 12% 13%;
+    --muted-foreground: 218 5% 60%;
+    --primary: 18 100% 50%; /* #FF4D00 signal */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 12% 11%;
+    --secondary-foreground: 45 27% 94%;
+    --accent: 18 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --border: 220 10% 14%;
+    --input: 220 10% 17%;
+    --ring: 18 100% 50%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgba(255, 77, 0, 0.22);
+  }
+}
+
+@layer components {
+  /* Console panels. Hairline + barely-there fill; opacity is the hierarchy. */
+  .glass {
+    @apply border border-white/[0.08] bg-white/[0.04];
+  }
+  .glass-strong {
+    @apply border border-white/[0.12] bg-white/[0.06] backdrop-blur-md;
+  }
+  .glass-hover {
+    @apply transition-colors duration-200 hover:bg-white/[0.07];
+  }
+  /* Status chips — color/15 fill + color text + color/25 border. */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+  /* Telemetry — the console voice: mono, uppercase, tracked wide. */
+  .telemetry {
+    @apply font-mono text-[11px] uppercase tracking-[0.18em];
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* Star-chart dot grids */
+  .bg-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.06) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+  .bg-grid-light {
+    background-image: radial-gradient(circle at 1px 1px, rgba(20, 22, 27, 0.07) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+  /* Shimmer sweep used on loading surfaces */
+  .shimmer::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+    animation: shimmer 1.8s infinite;
+  }
+}
+
+/* Refined scrollbars (studio) */
+.dark ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
