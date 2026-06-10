@@ -1,6 +1,5 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "./_generated/server";
-import type { StarterFile } from "./agents/starterKit";
 
 /** Public: the live file list for a version — powers the activity log + code view. */
 export const listByVersion = query({

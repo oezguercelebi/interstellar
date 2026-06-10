@@ -175,9 +175,9 @@ const REGISTERED_SURFACE: Record<string, string[]> = {
     "needsThumbnail",
     "edit",
   ],
-  "convex/studio.ts": ["listMessages", "workflowStatus"],
+  "convex/studio.ts": ["listMessages"],
   "convex/testHelpers.ts": ["seedFixture"],
-  "convex/versions.ts": ["get", "listByProject", "create", "patch", "setActive"],
+  "convex/versions.ts": ["patch"],
 };
 
 test("C1/C5: registered-export surface is frozen per convex file", () => {

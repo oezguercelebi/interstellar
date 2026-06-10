@@ -1,4 +1,4 @@
-/** Model ids, effort tiers, and the parallel design directions. Convex-local (no Next imports). */
+/** Model ids, effort gating, and the design theme registry. Convex-local (no Next imports). */
 
 export const MODEL_OPUS = "claude-opus-4-8";
 export const MODEL_SONNET = "claude-sonnet-4-6";
@@ -19,9 +19,6 @@ export function isModelId(m: string): m is ModelId {
  * Effort only applies to Opus 4.8 (adaptive thinking via output_config.effort).
  * Sonnet/Haiku reject the param, so we only forward it for Opus.
  */
-export const EFFORTS = ["low", "medium", "high"] as const;
-export type Effort = (typeof EFFORTS)[number];
-
 export function supportsEffort(model: string): boolean {
   return model === MODEL_OPUS;
 }
@@ -132,13 +129,6 @@ export function themeDirective(
 export function themeName(themeKey?: string): string {
   return themeByKey(themeKey ?? DEFAULT_THEME).name;
 }
-
-/** Single-design default — kept for compatibility with the variant-count picker. */
-export const SIGNATURE: VariantSpec = {
-  key: "signature",
-  name: "Interstellar Signature",
-  directive: "Flight Manual",
-};
 
 /** How many variants to generate for a given count (style now comes from theme). */
 export function pickVariants(count: number): VariantSpec[] {
