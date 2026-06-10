@@ -258,9 +258,9 @@ export const setThumbnail = mutation({
 });
 
 /**
- * Wipe every build for the demo user — projects + their versions, files, and
- * checkpoints. Used to reset the gallery. Agent/workflow component tables are
- * left to expire on their own (they're internal and harmless once orphaned).
+ * Wipe every build for the demo user — projects + their versions and files.
+ * Used to reset the gallery. Agent/workflow component tables are left to
+ * expire on their own (they're internal and harmless once orphaned).
  */
 export const deleteAll = mutation({
   args: {},
@@ -288,11 +288,6 @@ export const deleteAll = mutation({
         await ctx.db.delete(version._id);
         versionsDeleted++;
       }
-      const checkpoints = await ctx.db
-        .query("checkpoints")
-        .withIndex("by_project", (q) => q.eq("projectId", project._id))
-        .collect();
-      for (const c of checkpoints) await ctx.db.delete(c._id);
       await ctx.db.delete(project._id);
     }
     return { projects: projects.length, versions: versionsDeleted, files: filesDeleted };

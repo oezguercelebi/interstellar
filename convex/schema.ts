@@ -66,10 +66,4 @@ export default defineSchema({
     .index("by_version", ["versionId"])
     .index("by_version_path", ["versionId", "path"]),
 
-  checkpoints: defineTable({
-    projectId: v.id("projects"),
-    versionId: v.id("versions"),
-    label: v.string(),
-    createdAt: v.number(),
-  }).index("by_project", ["projectId"]),
 });
