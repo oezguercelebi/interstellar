@@ -51,9 +51,13 @@ const makeAppPlanSchema = (kit: "classic" | "nativewind") =>
       description: z.string(),
       seedItems: z
         .array(z.string())
-        .min(5)
-        .max(8)
-        .describe("Realistic example content strings for this app"),
+        .min(3)
+        // Generous ceiling: models routinely overshoot a tight max and a
+        // validation miss costs the whole plan (observed live: 10 items
+        // emitted against max(8) -> AI_NoObjectGeneratedError -> planless
+        // generation). formatPlan slices to 8.
+        .max(20)
+        .describe("5-8 realistic example content strings for this app"),
     }),
     palette: z.object({
       mode: z.enum(["light", "dark"]),
@@ -81,7 +85,10 @@ function formatPlan(plan: AppPlan, kit: "classic" | "nativewind"): string {
       ? "\ndetailScreens:\n" +
         plan.detailScreens.map((d) => `  - route: "${d.route}", purpose: "${d.purpose}"`).join("\n")
       : "";
-  const seeds = plan.contentDomain.seedItems.map((s) => `    - "${s}"`).join("\n");
+  const seeds = plan.contentDomain.seedItems
+    .slice(0, 8)
+    .map((s) => `    - "${s}"`)
+    .join("\n");
   const base = `appName: "${plan.appName}"
 oneLiner: "${plan.oneLiner}"
 tabs:
@@ -156,7 +163,7 @@ export const runVariant = internalAction({
           "",
           "Generate a concrete app plan for this concept.",
           "- Tabs, screens, and seed items must directly reflect the app concept.",
-          "- Seed items must be realistic domain content (never lorem ipsum, never 'Item 1').",
+          "- Provide exactly 5-8 seed items of realistic domain content (never lorem ipsum, never 'Item 1').",
           "- Palette must honour the style directive when one is given; otherwise invent a",
           "  coherent palette that fits the concept's mood (finance = crisp/trustworthy,",
           "  fitness = energetic, meditation = calm/airy, etc.).",
