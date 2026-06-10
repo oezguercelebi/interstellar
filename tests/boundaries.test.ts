@@ -157,7 +157,7 @@ test("C1: _generated/api importers inside convex/ are entries + agents/codegen.t
 // none of which tsc can see. Renaming/deleting/adding a registered function
 // MUST be done together with this table, in the same commit.
 // ---------------------------------------------------------------------------
-const REGISTERED_RE = /^export const (\w+) = (query|mutation|internalQuery|internalMutation|internalAction)\(/gm;
+const REGISTERED_RE = /^export const (\w+) = (query|mutation|action|httpAction|internalQuery|internalMutation|internalAction)\(/gm;
 
 const REGISTERED_SURFACE: Record<string, string[]> = {
   "convex/codegen.ts": ["runVariant"],
@@ -310,6 +310,7 @@ test("C3: the pure test closure stays _generated-free and .ts-extensioned", () =
     "convex/lib/validate.ts",
     "convex/lib/webcompat.ts",
     "lib/models.ts",
+    "lib/previewContract.ts",
     "lib/themes.ts",
   ];
   for (const f of closure) {
