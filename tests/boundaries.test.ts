@@ -323,6 +323,7 @@ test("C3: the pure test closure stays _generated-free and .ts-extensioned", () =
     "convex/agents/designSystem.ts",
     "convex/agents/prompt.ts",
     "convex/agents/starterKit.ts",
+    "convex/agents/starterKitNativewind.ts",
     "convex/lib/sandbox/typecheckRepair.ts",
     "convex/lib/styles.ts",
     "convex/lib/validate.ts",
