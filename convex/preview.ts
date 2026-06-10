@@ -7,12 +7,13 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { repairFiles } from "./lib/webcompat";
 import { getSandboxProvider } from "./lib/sandbox";
+import { SANDBOX_APP_ROOT } from "./lib/sandbox/types";
 import {
   parseTscOutput,
   selectImplicatedFiles,
   callRepairModel,
   truncateErrorOutput,
-} from "./lib/typecheckRepair";
+} from "./lib/sandbox/typecheckRepair";
 
 /**
  * Materialize a generated app into a sandbox and serve a live preview.
@@ -161,10 +162,7 @@ async function runTypecheckRepair(
   }
 
   try {
-    // We need the project root. The Daytona sandbox always uses getWorkDir()
-    // which is /home/daytona/expo-app. We infer it from the provision path; if
-    // unavailable, use the known default.
-    const proj = "/home/daytona/expo-app";
+    const proj = SANDBOX_APP_ROOT;
 
     // ── Step 1: Check tsc is present ───────────────────────────────────────
     const checkResult = await provider.exec(sandboxId, "test -x ./node_modules/.bin/tsc && echo present || echo absent", {

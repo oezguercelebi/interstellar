@@ -7,7 +7,7 @@
  * generated source files, start Metro web, and return the preview URL.
  * Expected provision time: ~30-90s.
  *
- * Snapshot layout: /home/daytona/expo-app/ (returned by getWorkDir()), with a
+ * Snapshot layout: SANDBOX_APP_ROOT (returned by getWorkDir()), with a
  * ROOT app/ directory as the Expo Router root — exactly what bake-snapshot.mjs
  * builds. Generated files (app/, components/, store/, theme/) upload 1:1 to the
  * project root, replacing the snapshot's placeholder screens.
@@ -29,6 +29,7 @@
  * "use node" actions (convex/preview.ts).
  */
 import { Daytona } from "@daytonaio/sdk";
+import { SANDBOX_APP_ROOT } from "./types";
 import type { AppFile, ExecResult, ProvisionResult, SandboxProvider } from "./types";
 
 const PREVIEW_PORT = 8081;
@@ -94,11 +95,11 @@ export class DaytonaProvider implements SandboxProvider {
     const sandbox = await daytona.create(createParams, { timeout: 120 });
 
     // ── RESOLVE PROJECT PATH ─────────────────────────────────────────────────
-    // getWorkDir() returns the Expo project root (e.g. /home/daytona/expo-app).
+    // getWorkDir() returns the Expo project root (e.g. SANDBOX_APP_ROOT).
     // getUserRootDir() may return /root (connected as root) which is WRONG for
     // this snapshot where the actual user is `daytona` and the project lives at
-    // /home/daytona/expo-app.
-    const proj = (await sandbox.getWorkDir()) ?? "/home/daytona/expo-app";
+    // SANDBOX_APP_ROOT.
+    const proj = (await sandbox.getWorkDir()) ?? SANDBOX_APP_ROOT;
 
     // ── SCAFFOLD (cold path only) ───────────────────────────────────────────
     if (!snapshotName) {

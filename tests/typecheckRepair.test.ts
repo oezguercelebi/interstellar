@@ -1,4 +1,4 @@
-// Unit tests for the pure helpers in convex/lib/typecheckRepair.ts.
+// Unit tests for the pure helpers in convex/lib/sandbox/typecheckRepair.ts.
 // Tests cover tsc output parsing, implicated-file selection, repair-prompt
 // construction, and the truncation helper.
 // No Convex runtime or live Daytona sandbox needed — all pure functions.
@@ -13,7 +13,7 @@ import {
   MAX_ERROR_LINES,
   MAX_IMPLICATED_FILES,
   type TscError,
-} from "../convex/lib/typecheckRepair.ts";
+} from "../convex/lib/sandbox/typecheckRepair.ts";
 
 // ── parseTscOutput ────────────────────────────────────────────────────────────
 

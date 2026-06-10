@@ -26,8 +26,8 @@
 import { generateObject } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
-import { MODEL_SONNET } from "./styles.ts";
-import type { AppFile } from "./sandbox/types";
+import { MODEL_SONNET } from "../styles.ts";
+import type { AppFile } from "./types";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -149,8 +149,6 @@ const RepairResponseSchema = z.object({
     )
     .describe("Only files that needed changes; no new files"),
 });
-
-export type RepairResponse = z.infer<typeof RepairResponseSchema>;
 
 // ── Model repair call ─────────────────────────────────────────────────────────
 

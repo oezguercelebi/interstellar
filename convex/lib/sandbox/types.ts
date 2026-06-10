@@ -13,6 +13,12 @@
  * directly, so a new provider just needs a URL that renders inside an iframe.
  */
 
+/**
+ * The Expo project root inside a sandbox.
+ * Baked into the Daytona snapshot by scripts/bake-snapshot.mjs — these must agree.
+ */
+export const SANDBOX_APP_ROOT = "/home/daytona/expo-app";
+
 /** A generated source file to materialize into the sandbox. */
 export interface AppFile {
   path: string; // repo-relative, e.g. "app/index.tsx"

@@ -29,6 +29,7 @@ const DEPS = [
 
 // Build the image. Project lives at /home/daytona/expo-app with a ROOT app/ dir
 // (generated apps use relative imports, so a root layout resolves cleanly).
+// That path is mirrored as SANDBOX_APP_ROOT in convex/lib/sandbox/types.ts — keep them in sync.
 const image = Image.base("node:20-bookworm")
   .runCommands(
     "useradd -m -s /bin/bash daytona || true",
