@@ -1,3 +1,5 @@
+"use node";
+
 /**
  * Daytona implementation of SandboxProvider.
  *

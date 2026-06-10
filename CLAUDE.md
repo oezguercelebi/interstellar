@@ -10,7 +10,7 @@ of these rules. Gate after every change: `npm run typecheck && npm run test:pure
 | **convex-core** | `convex/{schema,convex.config,projects,files,versions,studio,testHelpers,codegenWorkflow}.ts`, `convex/lib/__fixtures__/minimalExpoApp.ts` | `api.projects.*`, `api.files.listByVersion`, `api.studio.listMessages`, `api.testHelpers.seedFixture`, `internal.files.*`, `internal.versions.patch`, `internal.codegenWorkflow.generateApp` (durable workflow identity — never rename) |
 | **pipeline-kernel** | `convex/lib/{styles,validate,webcompat}.ts` | model registry (`MODELS`, `DEFAULT_MODEL`, …), theme registry (`THEMES`, `pickVariants`, …), `validateManifest`, `repairFiles`. Pure: no `_generated`, no npm — test-enforced |
 | **codegen** | `convex/codegen.ts`, `convex/agents/{codegen,prompt,designSystem,starterKit}.ts` | `internal.codegen.runVariant` (sole runtime entry), `STARTER_FILES`; prompt helpers are test-only |
-| **preview** | `convex/preview.ts` (the ONLY `"use node"` file), `convex/lib/sandbox/{index,types,daytona,typecheckRepair}.ts`, `app/api/preview/[id]/[[...path]]/route.ts` | `internal.preview.provisionPreview`, `GET /api/preview/:sandboxId/*`, `SandboxProvider` + `getSandboxProvider()` (the Modal/E2B/Fly swap point), `SANDBOX_APP_ROOT` |
+| **preview** | `convex/preview.ts` + `convex/lib/sandbox/{index,daytona}.ts` (the three `"use node"` files), `convex/lib/sandbox/{types,typecheckRepair}.ts`, `app/api/preview/[id]/[[...path]]/route.ts` | `internal.preview.provisionPreview`, `GET /api/preview/:sandboxId/*`, `SandboxProvider` + `getSandboxProvider()` (the Modal/E2B/Fly swap point), `SANDBOX_APP_ROOT` |
 | **studio-ui** | `app/`, `components/`, `lib/` (named contracts: `lib/previewContract.ts`, `components/studio/agentMessage.ts`) | routes `/` and `/studio/[projectId]`; imports from `convex/` ONLY via `convex/_generated/` |
 | **qa-ops** | `tests/`, `scripts/`, `docs/`, `README.md`, `CONTRIBUTING.md`, config files | `npm run typecheck / test:pure / build / qa:e2e / qa:preview`; the frozen string-ref surface |
 
@@ -51,8 +51,12 @@ value-imports must carry the `.ts` extension.
 
 ## Rule 4 — node/Daytona reachability
 
-`"use node"` sits in directive position (line 1) of exactly one file: `convex/preview.ts`.
-`@daytonaio/sdk` is reachable only via `preview.ts → convex/lib/sandbox/**` (BFS-enforced).
+`"use node"` sits in directive position (line 1) of exactly three files: `convex/preview.ts`,
+`convex/lib/sandbox/index.ts`, `convex/lib/sandbox/daytona.ts`. Convex analyzes every
+`convex/` file in the isolate runtime unless the file ITSELF carries the directive — a
+node-API file riding on its importer's directive breaks `convex dev`/`codegen` bundling
+(this happened: @daytonaio/sdk → dotenv → node builtins). `@daytonaio/sdk` is reachable
+only via `preview.ts → convex/lib/sandbox/**` (BFS-enforced).
 
 ## Rule 5 — mirror contract
 

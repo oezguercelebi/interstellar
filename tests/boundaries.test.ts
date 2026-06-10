@@ -19,7 +19,7 @@
  *    workflow journal pins internal.codegenWorkflow.generateApp — none of it
  *    visible to tsc. The registered-export snapshot turns renames into a fast
  *    red test instead of a runtime "function not found".
- *  - C6 node isolation: "use node" only in convex/preview.ts; @daytonaio/sdk
+ *  - C6 node isolation: "use node" in preview.ts + lib/sandbox/{index,daytona}.ts; @daytonaio/sdk
  *    reachable only via preview.ts → lib/sandbox/**.
  *  - C3 strip-types closure: files the pure tests import must stay free of
  *    _generated / convex npm imports and use .ts-extensioned relative imports.
@@ -242,14 +242,21 @@ test("C1: every module pinned by _generated/api.d.ts typeof-imports exists", () 
 // ---------------------------------------------------------------------------
 // C6 — node isolation.
 // ---------------------------------------------------------------------------
-test('C6: "use node" directive (line 1) appears in exactly convex/preview.ts', () => {
+test('C6: "use node" directive (line 1) appears in exactly the node-only file set', () => {
   // Directive position only: the string "use node" also legitimately appears in
-  // a comment in lib/sandbox/daytona.ts and in _generated docs.
+  // comments and in _generated docs. Convex analyzes EVERY convex/ file in the
+  // isolate runtime unless the file itself carries the directive — riding on an
+  // importer's directive does not work (the @daytonaio/sdk dotenv import broke
+  // `convex dev` bundling until index.ts/daytona.ts got their own directives).
   const useNodeFiles = convexFiles.filter((f) => {
     const firstLine = read(f).split(/\r?\n/, 1)[0] ?? "";
     return /^["']use node["'];?\s*$/.test(firstLine.trim());
   });
-  assert.deepEqual(useNodeFiles, ["convex/preview.ts"]);
+  assert.deepEqual(useNodeFiles, [
+    "convex/lib/sandbox/daytona.ts",
+    "convex/lib/sandbox/index.ts",
+    "convex/preview.ts",
+  ]);
 });
 
 test("C6: @daytonaio/sdk appears in convex/ only inside lib/sandbox/daytona.ts", () => {

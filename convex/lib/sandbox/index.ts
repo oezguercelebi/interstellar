@@ -1,3 +1,5 @@
+"use node";
+
 /**
  * Sandbox provider selection. Exactly one implementation ships today.
  *
