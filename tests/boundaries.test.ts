@@ -109,8 +109,8 @@ const ENTRY_FILES = [
 test("scanner self-check: minimum file counts per scanned directory", () => {
   assert.ok(convexFiles.length >= 22, `convex/ scan found ${convexFiles.length} files, expected >= 22`);
   assert.ok(appFiles.length >= 5, `app/ scan found ${appFiles.length} files, expected >= 5`);
-  assert.ok(componentFiles.length >= 21, `components/ scan found ${componentFiles.length} files, expected >= 21`);
-  assert.ok(libFiles.length >= 4, `lib/ scan found ${libFiles.length} files, expected >= 4`);
+  assert.ok(componentFiles.length >= 22, `components/ scan found ${componentFiles.length} files, expected >= 22`);
+  assert.ok(libFiles.length >= 5, `lib/ scan found ${libFiles.length} files, expected >= 5`);
 });
 
 // ---------------------------------------------------------------------------
@@ -366,21 +366,21 @@ test("frontend imports from the convex/ directory go only via _generated", () =>
 test("literal pins: 8081 port / 'daytona' provider / /api/preview/ prefix", () => {
   const daytona = read("convex/lib/sandbox/daytona.ts");
   const route = read("app/api/preview/[id]/[[...path]]/route.ts");
-  const previewStage = read("components/studio/PreviewStage.tsx");
+  const previewContract = read("lib/previewContract.ts");
   const waitReady = read("scripts/wait-preview-ready.mjs");
   const qaPreview = read("scripts/qa-preview.mjs");
 
   // Expo web port triple: sandbox preview, same-origin proxy, client URL parsing.
   assert.ok(daytona.includes("8081"), "daytona.ts lost the 8081 preview port");
   assert.ok(route.includes("8081"), "preview proxy route lost the 8081 upstream port");
-  assert.ok(previewStage.includes("8081-([a-f0-9-]{8,40})"), "PreviewStage lost the 8081 sandbox-id regex");
+  assert.ok(previewContract.includes("8081-([a-f0-9-]{8,40})"), "previewContract lost the 8081 sandbox-id regex");
 
   // Provider literal: provisioning result, client gating, QA polling.
   assert.ok(daytona.includes('"daytona"'), "daytona.ts lost its provider name literal");
-  assert.ok(previewStage.includes('"daytona"'), "PreviewStage lost the daytona provider check");
+  assert.ok(previewContract.includes('"daytona"'), "previewContract lost the daytona provider check");
   assert.ok(waitReady.includes('"daytona"'), "wait-preview-ready.mjs lost the daytona provider check");
 
   // Same-origin proxy prefix: client iframe URL + QA harness.
-  assert.ok(previewStage.includes("/api/preview/"), "PreviewStage lost the /api/preview/ proxy prefix");
+  assert.ok(previewContract.includes("/api/preview/"), "previewContract lost the /api/preview/ proxy prefix");
   assert.ok(qaPreview.includes("/api/preview/"), "qa-preview.mjs lost the /api/preview/ proxy prefix");
 });

@@ -7,24 +7,7 @@ import html2canvas from "html2canvas";
 import { Code2, ExternalLink, QrCode, RefreshCw, RotateCw, Smartphone } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-
-/** The sandbox uuid, from sandboxId or parsed out of the preview URL. */
-function sandboxIdOf(version: Doc<"versions">): string | undefined {
-  if (version.sandboxId) return version.sandboxId;
-  const m = version.previewUrl?.match(/8081-([a-f0-9-]{8,40})\./i);
-  return m?.[1];
-}
-
-/**
- * The same-origin proxy URL for a live daytona preview. Routing the iframe through
- * /api/preview/<id> strips Daytona's "I Understand" warning (the proxy injects the
- * skip header server-side) and makes the frame same-origin so we can screenshot it.
- */
-function proxyUrlOf(version: Doc<"versions">): string | undefined {
-  if (version.sandboxProvider !== "daytona") return undefined;
-  const id = sandboxIdOf(version);
-  return id ? `/api/preview/${id}/` : undefined;
-}
+import { isPreviewStale, proxyUrlOf, THUMBNAIL_MAX_BYTES } from "@/lib/previewContract";
 import { DeviceFrame } from "@/components/DeviceFrame";
 import { InterstellarMark } from "@/components/InterstellarMark";
 import { Segmented } from "@/components/ui/segmented";
@@ -59,14 +42,9 @@ export function PreviewStage({ version }: { version: Doc<"versions"> }) {
   // Sandboxes are ephemeral (auto-stop when idle), so an older build's stored URL
   // may point at a stopped/deleted sandbox. "provisioning" = a reopen in flight.
   const provisioning = version.sandboxProvider === "provisioning" || reopening;
-  // Daytona auto-stops idle sandboxes after ~30 min — past that the stored URL is
-  // almost certainly dead, so show the asleep state instead of Daytona's warning.
-  // Builds from before previewAt existed have no timestamp → treat as stale too
-  // (their sandboxes are long gone), so the user gets the Reopen path, not a 404.
-  const STALE_MS = 28 * 60 * 1000;
-  const stale =
-    version.sandboxProvider === "daytona" &&
-    (!version.previewAt || Date.now() - version.previewAt > STALE_MS);
+  // Past the 28-min trust window (lib/previewContract), the stored URL is almost
+  // certainly dead — show the asleep state instead of Daytona's warning.
+  const stale = isPreviewStale(version);
   // Embed through the same-origin proxy (no Daytona warning); fall back to the raw
   // URL if we can't derive a sandbox id. Don't embed a known-stale URL.
   const embedUrl = stale ? undefined : proxyUrlOf(version) ?? url;
@@ -130,13 +108,12 @@ export function PreviewStage({ version }: { version: Doc<"versions"> }) {
         });
         // Encode at high quality, stepping down only if needed to fit Convex's
         // ~1 MiB document cap (a stored base64 dataURL must stay well under it).
-        const MAX = 950_000;
         let dataUrl = "";
         for (const q of [0.95, 0.9, 0.82, 0.7]) {
           dataUrl = canvas.toDataURL("image/jpeg", q);
-          if (dataUrl.length <= MAX) break;
+          if (dataUrl.length <= THUMBNAIL_MAX_BYTES) break;
         }
-        if (dataUrl.startsWith("data:image/") && dataUrl.length <= MAX) {
+        if (dataUrl.startsWith("data:image/") && dataUrl.length <= THUMBNAIL_MAX_BYTES) {
           await setThumbnail({ projectId: version.projectId, dataUrl });
         }
       } catch (err) {
