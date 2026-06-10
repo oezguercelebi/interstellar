@@ -155,6 +155,8 @@ The **files table** is the source of truth. The agent emits every file through a
 tool — not its text output — making generation resumable, streamable, and diffable. The studio
 renders each file the instant it lands.
 
+Module map and the hard seam rules (zero-regeneration, frozen string-ref surface, mirror contracts) live in [CLAUDE.md](CLAUDE.md).
+
 ### Tech stack
 
 | Layer | Choice | Notes |

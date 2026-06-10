@@ -1,3 +1,5 @@
+> **Historical document** — the original design brief; its file tree and details predate the current layout (see [CLAUDE.md](../CLAUDE.md) for the live module map).
+
 # Interstellar — Coding Agent · Design Brief
 
 > A designer's studio that emits a real native app. Describe an idea; an AI agent

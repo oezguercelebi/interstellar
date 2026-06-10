@@ -5,7 +5,7 @@ non-obvious gotchas that will save you hours.
 
 ## Local setup
 
-Follow the [README](README.md#running-locally) — short version:
+Follow the [README](README.md#getting-started) — short version:
 
 ```bash
 npm install                          # .npmrc sets legacy-peer-deps (see below)
@@ -31,6 +31,14 @@ npm run test:pure                    # pure-static unit tests, ~0.2s — run on 
 npm run typecheck                    # tsc --noEmit
 npm run qa:e2e -- --fixture good     # real Daytona sandbox E2E (no model call, ~30s)
 ```
+
+## Module layout & boundaries
+
+The module map and the hard seam rules — the zero-regeneration rule for
+`convex/_generated`, the frozen string-ref surface, the pure test closure, the
+client/server mirror contract — live in [CLAUDE.md](CLAUDE.md). `npm run test:pure`
+now includes boundary enforcement (`tests/boundaries.test.ts`, `tests/mirrors.test.ts`):
+if you change a module's surface, update its freeze list in the same commit.
 
 ## Gotchas (hard-won — don't repeat them)
 
