@@ -163,9 +163,8 @@ export const NATIVEWIND_CONFIG_FILES = [
 ];
 
 // ---------------------------------------------------------------------------
-// Patch snippets — `node -e` bodies for the two JSON patches the bake applies
-// (byte-identical to the inline strings in scripts/bake-snapshot.mjs today;
-// the bake switches to consuming these constants at plan step 6).
+// Patch snippets — `node -e` bodies for the two JSON patches applied by BOTH
+// scripts/bake-snapshot.mjs and scripts/check-template.mjs.
 // Single-quoted JS only, so they stay shell-safe inside double quotes.
 // ---------------------------------------------------------------------------
 
