@@ -45,8 +45,9 @@ surface is frozen as a snapshot table in `tests/boundaries.test.ts`; renames fai
 tests value-import must use relative `.ts`-extensioned imports — no `@/` aliases, no
 `_generated`. The closure includes `lib/{models,themes,previewContract}.ts`,
 `convex/lib/{styles,validate,webcompat}.ts`, `convex/lib/sandbox/typecheckRepair.ts`, and
-`convex/agents/{prompt,designSystem,starterKit}.ts` — they must stay import-free; adding a
-client or npm import to them breaks `test:pure` by design.
+`convex/agents/{prompt,designSystem,starterKit}.ts` — enforced by C3 in
+`tests/boundaries.test.ts`: no `_generated`, no `convex`-package imports, and relative
+value-imports must carry the `.ts` extension.
 
 ## Rule 4 — node/Daytona reachability
 
