@@ -24,14 +24,14 @@ and commit the diff, never let it drift. Therefore:
 - Never move/rename a convex entry file (the 10: schema, convex.config, projects, files,
   versions, studio, testHelpers, codegen, codegenWorkflow, preview).
 - Registered functions (`query`/`mutation`/`internal*`/workflow defs) live ONLY in entry files.
-- `git diff convex/_generated` stays empty in every commit.
-- **These 7 api.d.ts-pinned helper paths are frozen** (typeof-imported by
-  `convex/_generated/api.d.ts`; moving any breaks tsc unfixably): `convex/agents/codegen.ts`,
-  `convex/agents/designSystem.ts`, `convex/agents/prompt.ts`, `convex/lib/styles.ts`,
-  `convex/lib/validate.ts`, `convex/lib/webcompat.ts`, `convex/lib/__fixtures__/minimalExpoApp.ts`.
-- Regen-diff note: if a future `npx convex dev` regen ever succeeds, it will **ADD** typeof
-  entries for currently-absent modules (`lib/sandbox/*` incl. `typecheckRepair`,
-  `agents/starterKit`) — that diff must be consciously reviewed and committed, not reverted reflexively.
+- `git diff convex/_generated` stays empty in every commit, except a conscious regen
+  (`npx convex codegen`) reviewed and committed on its own.
+- **Every helper path typeof-pinned by `convex/_generated/api.d.ts` is frozen** (moving one
+  breaks tsc against the committed bindings). The authoritative list is api.d.ts itself —
+  today: `agents/{codegen,designSystem,prompt,starterKit,starterKitNativewind}.ts`,
+  `lib/{styles,validate,webcompat,palette}.ts`, `lib/__fixtures__/minimalExpoApp.ts`,
+  `lib/sandbox/{index,types,daytona,typecheckRepair}.ts`. The api.d.ts path-existence guard
+  in `tests/boundaries.test.ts` enforces it mechanically.
 - Adding a new **plain-function** file under `convex/` (no registered exports) is regen-safe.
   Don't let "never add convex files" ossify — the boundary test, not file count, is the law.
 

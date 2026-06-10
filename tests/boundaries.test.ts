@@ -10,10 +10,10 @@
  * commit — the table diff is the review artifact.
  *
  * What this encodes (see .tm/research/modularization-plan.md):
- *  - C1 zero-regeneration: convex/_generated is committed + load-bearing and
- *    `npx convex codegen` is broken locally. Entry files keep exact paths;
- *    registered functions exist only in entry files; the api.d.ts typeof-pins
- *    must keep resolving.
+ *  - C1 zero-regeneration: convex/_generated is committed + load-bearing
+ *    (CI/Vercel run no codegen); regen only consciously via `npx convex
+ *    codegen`. Entry files keep exact paths; registered functions exist only
+ *    in entry files; the api.d.ts typeof-pins must keep resolving.
  *  - C5 string-ref surface: scripts/*.mjs call convex functions by untyped
  *    strings ("projects:inspect", "testHelpers:seedFixture", anyApi.…) and the
  *    workflow journal pins internal.codegenWorkflow.generateApp — none of it
