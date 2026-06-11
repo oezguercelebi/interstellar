@@ -46,6 +46,7 @@ export const start = mutation({
       console.warn(`Unknown STARTER_KIT value "${kitEnv}" — falling back to classic`);
     }
     const kit = kitEnv === "nativewind" ? ("nativewind" as const) : ("classic" as const);
+    const agentRunner = process.env.AGENT_RUNNER === "1";
     const specs = pickVariants(variants);
     const projectId = await ctx.db.insert("projects", {
       userId: DEMO_USER,
@@ -77,6 +78,7 @@ export const start = mutation({
         effort,
         threadId,
         createdAt: Date.now(),
+        ...(agentRunner ? { runner: "agent" as const } : {}),
       });
       // Seed starter-kit files so required-file validation passes immediately
       // and the model can focus on product screens rather than infrastructure.
@@ -214,12 +216,16 @@ export const reopenPreview = mutation({
       previewAt: undefined,
       error: undefined,
     });
+    // G5: only free the prior sandbox if the version has no live agent job.
+    // An agent-runner version owns its sandbox — provisionPreview must not
+    // eagerly delete it before the runner has a chance to report back.
+    const previousSandboxId = version.agentJobId ? undefined : version.sandboxId;
     await ctx.scheduler.runAfter(0, internal.preview.provisionPreview, {
       versionId,
       kit: version.kit, // stamped at creation; absent (pre-migration) = classic
       // Captured before re-provision: provisionPreview deletes it so the old and
       // new sandboxes don't both count against the disk quota during the reopen.
-      previousSandboxId: version.sandboxId,
+      previousSandboxId,
     });
   },
 });
@@ -354,6 +360,7 @@ export const edit = mutation({
     const model = isModelId(parent.model) ? parent.model : DEFAULT_MODEL;
     const effort = supportsEffort(model) ? parent.effort : undefined;
     const theme = parent.theme && isThemeKey(parent.theme) ? parent.theme : DEFAULT_THEME;
+    const agentRunner = process.env.AGENT_RUNNER === "1";
     const nextIndex = Math.max(...versions.map((v) => v.index)) + 1;
     const versionId = await ctx.db.insert("versions", {
       projectId,
@@ -372,6 +379,7 @@ export const edit = mutation({
       threadId,
       parentVersionId: parent._id,
       createdAt: Date.now(),
+      ...(agentRunner ? { runner: "agent" as const } : {}),
     });
     await ctx.runMutation(internal.files.cloneInto, {
       fromVersionId: parent._id,

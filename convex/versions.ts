@@ -38,6 +38,7 @@ export const patch = internalMutation({
     agentStreamId: v.optional(v.string()),
     agentStreamCursor: v.optional(v.number()),
     agentStreamFullText: v.optional(v.string()),
+    runner: v.optional(v.literal("agent")),
   },
   handler: async (ctx, { versionId, ...rest }) => {
     const patch = Object.fromEntries(

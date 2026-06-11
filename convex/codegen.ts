@@ -128,12 +128,37 @@ export const runVariant = internalAction({
     // in-flight workflow journals stay valid across the deploy.
     kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
   },
-  handler: async (ctx, args): Promise<{ ok: boolean; fileCount: number }> => {
+  handler: async (ctx, args): Promise<{ ok: boolean; fileCount: number; agentLaunched?: boolean }> => {
     const kit = args.kit ?? "classic";
     await ctx.runMutation(internal.versions.patch, {
       versionId: args.versionId,
       status: "generating",
     });
+
+    // Agent-runner gate: if this version was stamped with runner:"agent", hand
+    // off to launchAgentRunner instead of running the model inline. Falls back
+    // to the legacy path if launchAgentRunner returns launched:false so no
+    // existing behavior changes when AGENT_RUNNER is unset.
+    const versionForRunner = await ctx.runQuery(internal.versions.getById, { versionId: args.versionId });
+    if (versionForRunner?.runner === "agent") {
+      const launchResult = await ctx.runAction(internal.preview.launchAgentRunner, {
+        versionId: args.versionId,
+        isEdit: args.isEdit ?? false,
+        kit: args.kit,
+        threadId: args.threadId,
+        promptMessageId: args.promptMessageId,
+        model: args.model,
+        effort: args.effort,
+        styleDirective: args.styleDirective ?? "",
+      });
+      if (launchResult.launched) {
+        // Schedule a sweep so stale runs get cleaned up
+        await ctx.scheduler.runAfter(5 * 60 * 1000, internal.agentBridge.sweepStaleRuns, {});
+        return { ok: true, fileCount: 0, agentLaunched: true };
+      }
+      // Fall through to legacy path
+      console.log(`[runVariant] agent launch failed (${launchResult.reason}) — falling back to inline generation`);
+    }
 
     // In edit mode, give the model the current file list as context.
     let existingFiles: string | undefined;

@@ -135,6 +135,16 @@ test("proxyUrlOf: no provider → undefined", () => {
   assert.equal(proxyUrlOf(v), undefined);
 });
 
+test("proxyUrlOf: daytona + sandboxId + previewAt → appends previewAt param", () => {
+  const v: PreviewVersion = { sandboxProvider: "daytona", sandboxId: "myid123", previewAt: 1234567890 };
+  assert.equal(proxyUrlOf(v), "/api/preview/myid123/?previewAt=1234567890");
+});
+
+test("proxyUrlOf: daytona + sandboxId + no previewAt → no query param", () => {
+  const v: PreviewVersion = { sandboxProvider: "daytona", sandboxId: "myid123" };
+  assert.equal(proxyUrlOf(v), "/api/preview/myid123/");
+});
+
 // ── THUMBNAIL_MAX_BYTES ───────────────────────────────────────────────────────
 
 test("THUMBNAIL_MAX_BYTES is well under 1 MiB Convex limit", () => {

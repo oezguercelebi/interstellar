@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { buildJsCacheKey } from "../../../../../lib/jsCacheKey";
 
 /**
  * Same-origin preview proxy — removes Daytona's "I Understand, Continue" warning.
@@ -47,11 +48,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const base = `/api/preview/${id}`;
   const subPath = (path ?? []).join("/");
   const target = `${origin}/${subPath}${req.nextUrl.search}`;
+  const previewAt = req.nextUrl.searchParams.get("previewAt");
   const isBundle = /\.(bundle|js)(\?|$)/.test(subPath) || /[?&]platform=web/.test(req.nextUrl.search);
 
   // Serve a cached rewritten bundle immediately (skips the 4 MB refetch + regex).
+  // Cache key includes previewAt so a re-provisioned sandbox busts the old bundle.
   if (isBundle) {
-    const hit = jsCache.get(target);
+    const cacheKey = buildJsCacheKey(target, previewAt);
+    const hit = jsCache.get(cacheKey);
     if (hit) {
       return new Response(hit.body, {
         status: 200,
@@ -96,8 +100,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   if (contentType.includes("javascript")) {
     const js = rewriteAssetPaths(await upstream.text(), base);
     if (upstream.ok) {
+      const cacheKey = buildJsCacheKey(target, previewAt);
       if (jsCache.size >= JS_CACHE_MAX) jsCache.delete(jsCache.keys().next().value!);
-      jsCache.set(target, { body: js, contentType });
+      jsCache.set(cacheKey, { body: js, contentType });
     }
     return new Response(js, {
       status: upstream.status,

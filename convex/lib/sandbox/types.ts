@@ -89,6 +89,14 @@ export interface SandboxProvider {
   restartDevServer?(sandboxId: string, projectRoot: string): Promise<void>;
 
   /**
+   * Create a sandbox (no file upload, no Metro start) and return the
+   * sandbox id, preview URL, and work directory. Used by the agent-runner path
+   * which uploads files and starts the runner itself.
+   * Optional — providers that don't implement this fall back to the legacy path.
+   */
+  createSandbox?(opts?: ProvisionOpts): Promise<{ sandboxId: string; previewUrl: string; workDir: string }>;
+
+  /**
    * Delete a sandbox and free its quota immediately, instead of waiting for the
    * platform's idle auto-stop. Called when a version's preview is being replaced
    * (see provisionPreview's previousSandboxId teardown) so the old and new

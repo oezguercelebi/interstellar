@@ -33,11 +33,18 @@ export const generateApp = workflow.define({
   handler: async (step, { variants, isEdit }): Promise<void> => {
     await Promise.all(
       variants.map(async (variant, i) => {
-        await step.runAction(
+        const variantResult = await step.runAction(
           internal.codegen.runVariant,
           { ...variant, isEdit },
           { name: `generate-v${i}`, retry: true },
         );
+        if ((variantResult as { agentLaunched?: boolean }).agentLaunched) {
+          await step.runAction(
+            internal.codegen.awaitVariant,
+            { versionId: variant.versionId },
+            { name: `await-v${i}`, retry: true },
+          );
+        }
         await step.runAction(
           internal.preview.provisionPreview,
           { versionId: variant.versionId, kit: variant.kit },

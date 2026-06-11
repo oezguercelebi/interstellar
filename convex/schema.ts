@@ -68,6 +68,7 @@ export default defineSchema({
     agentStreamId: v.optional(v.string()), // active streaming row id in the agent component
     agentStreamCursor: v.optional(v.number()), // current stream delta cursor
     agentStreamFullText: v.optional(v.string()), // accumulated full text for persist-at-complete
+    runner: v.optional(v.literal("agent")),
   })
     .index("by_project", ["projectId"])
     .index("by_project_index", ["projectId", "index"]),

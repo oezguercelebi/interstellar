@@ -37,7 +37,9 @@ export function sandboxIdOf(version: PreviewVersion): string | undefined {
 export function proxyUrlOf(version: PreviewVersion): string | undefined {
   if (version.sandboxProvider !== "daytona") return undefined;
   const id = sandboxIdOf(version);
-  return id ? `/api/preview/${id}/` : undefined;
+  if (!id) return undefined;
+  const base = `/api/preview/${id}/`;
+  return version.previewAt ? `${base}?previewAt=${version.previewAt}` : base;
 }
 
 // Daytona auto-stops idle sandboxes after ~30 min — past that the stored URL is

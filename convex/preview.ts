@@ -48,12 +48,23 @@ export const provisionPreview = internalAction({
       return;
     }
 
+    // Fast-path: if the version already has a live agent-runner sandbox, skip
+    // re-provisioning — the runner manages the sandbox lifecycle itself.
+    const version = await ctx.runQuery(internal.versions.getById, { versionId });
+    if (version?.sandboxId && version.agentJobId) {
+      console.log(`provisionPreview: version ${versionId} has live agentJobId — skipping re-provision`);
+      return;
+    }
+
+    // G5: only free the prior sandbox if the version has no live agent job.
+    const safeToDelete = !version?.agentJobId;
+
     // Free this version's previous sandbox BEFORE provisioning its replacement,
     // so the two don't both count against the disk/CPU quota. Best-effort: a
     // failed teardown must never block the new preview — the orphan still
     // auto-stops on its own. reopenPreview has already cleared the stale URL, so
     // there's nothing live to protect here.
-    if (previousSandboxId && provider.delete) {
+    if (previousSandboxId && provider.delete && safeToDelete) {
       try {
         await provider.delete(previousSandboxId);
         console.log(`provisionPreview: freed prior sandbox ${previousSandboxId}`);
@@ -270,3 +281,121 @@ async function runTypecheckRepair(
     console.warn("[tsc-repair] repair loop failed (non-fatal):", String(err).slice(0, 300));
   }
 }
+
+/**
+ * Launch the agent-runner in a fresh sandbox.
+ *
+ * Creates a sandbox (no file upload, no Metro), probes for the runner binary
+ * (G3 capability check), optionally uploads parent files for edits, signs a
+ * job token, patches the version row, then launches the runner nohup-detached.
+ *
+ * Called by codegen.runVariant when version.runner === "agent". Falls back to
+ * the legacy path gracefully (returns launched:false) when any precondition
+ * is missing so existing behavior is byte-identical when AGENT_RUNNER is unset.
+ */
+export const launchAgentRunner = internalAction({
+  args: {
+    versionId: v.id("versions"),
+    isEdit: v.boolean(),
+    kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
+    threadId: v.string(),
+    promptMessageId: v.string(),
+    model: v.string(),
+    effort: v.optional(v.string()),
+    styleDirective: v.string(),
+    previousSandboxId: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ launched: boolean; reason: string }> => {
+    const provider = getSandboxProvider();
+    if (!provider) return { launched: false, reason: "no-provider" };
+
+    // G5: free prior sandbox only if version has no live agentJobId
+    const version = await ctx.runQuery(internal.versions.getById, { versionId: args.versionId });
+    if (!version) return { launched: false, reason: "version-not-found" };
+
+    if (args.previousSandboxId && provider.delete && !version.agentJobId) {
+      try { await provider.delete(args.previousSandboxId); }
+      catch (err) { console.warn(`[launchAgentRunner] could not free prior sandbox ${args.previousSandboxId}:`, String(err).slice(0, 200)); }
+    }
+
+    // Create sandbox (no file upload, no Metro)
+    if (!provider.createSandbox) {
+      console.log("[launchAgentRunner] provider does not support createSandbox — falling back to legacy path");
+      return { launched: false, reason: "no-create-sandbox" };
+    }
+    let sandboxId: string, previewUrl: string, workDir: string;
+    try {
+      ({ sandboxId, previewUrl, workDir } = await provider.createSandbox({ kit: args.kit }));
+    } catch (err) {
+      console.error("[launchAgentRunner] createSandbox failed:", String(err).slice(0, 400));
+      return { launched: false, reason: "create-failed" };
+    }
+
+    // G3 capability probe: check runner binary is present in snapshot
+    if (!provider.exec) {
+      try { await provider.delete?.(sandboxId); } catch {}
+      return { launched: false, reason: "no-exec" };
+    }
+    const probe = await provider.exec(sandboxId, "test -d /home/daytona/agent-runner && echo present || echo absent", { cwd: workDir, timeoutSeconds: 10 });
+    if (!probe.output.includes("present")) {
+      console.log("[launchAgentRunner] runner not found in snapshot — cleaning up and falling back");
+      try { await provider.delete?.(sandboxId); } catch {}
+      return { launched: false, reason: "no-runner" };
+    }
+
+    // For edits: upload parent files into the fresh sandbox
+    if (args.isEdit && provider.uploadFiles) {
+      const files = await ctx.runQuery(internal.files.snapshot, { versionId: args.versionId });
+      const live = files.filter((f: { deleted?: boolean }) => !f.deleted);
+      if (live.length > 0) {
+        await provider.exec(sandboxId, "rm -rf app components store theme lib src", { cwd: workDir, timeoutSeconds: 30 });
+        await provider.uploadFiles(sandboxId, live.map((f: { path: string; contents: string }) => ({ path: f.path, contents: f.contents })), workDir);
+      }
+    }
+
+    // Sign job token
+    const secret = process.env.AGENT_JOB_SECRET ?? "";
+    if (!secret) {
+      try { await provider.delete?.(sandboxId); } catch {}
+      return { launched: false, reason: "no-job-secret" };
+    }
+    const { signToken } = await import("./lib/agentRunner/token.js");
+    const exp = Date.now() + 4 * 60 * 60 * 1000;
+    const jobToken = await signToken({ versionId: args.versionId, exp }, secret);
+    const jobId = crypto.randomUUID();
+
+    // Patch {sandboxId, agentJobId, sandboxProvider, previewUrl} BEFORE launching
+    await ctx.runMutation(internal.versions.patch, {
+      versionId: args.versionId,
+      sandboxId,
+      agentJobId: jobId,
+      sandboxProvider: "daytona",
+      previewUrl,
+    });
+
+    // Build env and launch runner nohup-detached
+    function shellQ(val: string): string {
+      return `'${val.replace(/'/g, "'\\''")}'`;
+    }
+    const convexUrl = process.env.CONVEX_SITE_URL ?? process.env.CONVEX_URL ?? "";
+    const anthropicKey = process.env.AGENT_RUNNER_ANTHROPIC_KEY ?? "";
+    const envPairs: Array<[string, string]> = [
+      ["ANTHROPIC_API_KEY", anthropicKey],
+      ["CONVEX_URL", convexUrl],
+      ["JOB_TOKEN", jobToken],
+      ["versionId", args.versionId],
+      ["threadId", args.threadId],
+      ["promptMessageId", args.promptMessageId],
+      ["model", args.model],
+      ["effort", args.effort ?? ""],
+      ["kit", args.kit ?? "classic"],
+      ["isEdit", args.isEdit ? "true" : "false"],
+      ["styleDirective", args.styleDirective],
+    ];
+    const envPrefix = envPairs.map(([k, v]) => `${k}=${shellQ(v)}`).join(" ");
+    const launchCmd = `env ${envPrefix} nohup node /home/daytona/agent-runner/run.mjs > /tmp/agent-runner.log 2>&1 &`;
+    await provider.exec(sandboxId, launchCmd, { cwd: workDir, timeoutSeconds: 15 });
+    console.log(`[launchAgentRunner] runner launched for version ${args.versionId} in sandbox ${sandboxId}`);
+    return { launched: true, reason: "ok" };
+  },
+});

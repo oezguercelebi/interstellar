@@ -111,7 +111,7 @@ test("scanner self-check: minimum file counts per scanned directory", () => {
   assert.ok(convexFiles.length >= 28, `convex/ scan found ${convexFiles.length} files, expected >= 28`);
   assert.ok(appFiles.length >= 5, `app/ scan found ${appFiles.length} files, expected >= 5`);
   assert.ok(componentFiles.length >= 22, `components/ scan found ${componentFiles.length} files, expected >= 22`);
-  assert.ok(libFiles.length >= 5, `lib/ scan found ${libFiles.length} files, expected >= 5`);
+  assert.ok(libFiles.length >= 6, `lib/ scan found ${libFiles.length} files, expected >= 6`);
 });
 
 // ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ const REGISTERED_SURFACE: Record<string, string[]> = {
   ],
   "convex/codegen.ts": ["awaitVariant", "runVariant"],
   "convex/files.ts": ["listByVersion", "snapshot", "upsert", "remove", "seedStarter", "cloneInto"],
-  "convex/preview.ts": ["provisionPreview"],
+  "convex/preview.ts": ["launchAgentRunner", "provisionPreview"],
   "convex/projects.ts": [
     "start",
     "get",
@@ -345,6 +345,7 @@ test("C3: the pure test closure stays _generated-free and .ts-extensioned", () =
     "convex/lib/styles.ts",
     "convex/lib/validate.ts",
     "convex/lib/webcompat.ts",
+    "lib/jsCacheKey.ts",
     "lib/models.ts",
     "lib/previewContract.ts",
     "lib/themes.ts",

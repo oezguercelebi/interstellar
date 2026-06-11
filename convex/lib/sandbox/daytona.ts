@@ -219,6 +219,38 @@ export class DaytonaProvider implements SandboxProvider {
   }
 
   /**
+   * Create a sandbox from the snapshot (no file upload, no Metro start).
+   * Returns the sandbox id, preview URL, and work directory for the agent-runner
+   * path, which handles file upload and runner launch itself.
+   */
+  async createSandbox(opts?: ProvisionOpts): Promise<{ sandboxId: string; previewUrl: string; workDir: string }> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
+    const snapshotName = process.env.DAYTONA_SNAPSHOT;
+    const target = process.env.DAYTONA_TARGET;
+    const kit = opts?.kit ?? "classic";
+
+    if (kit === "nativewind" && !snapshotName) {
+      throw new Error(
+        "NativeWind starter requires the pre-baked snapshot; set DAYTONA_SNAPSHOT or unset STARTER_KIT",
+      );
+    }
+
+    const daytona = new Daytona({ apiKey, apiUrl: process.env.DAYTONA_API_URL });
+
+    const createParams = snapshotName
+      ? { snapshot: snapshotName, public: true, autoStopInterval: 30, ...(target ? { target } : {}) }
+      : { public: true, autoStopInterval: 30, ...(target ? { target } : {}) };
+
+    const sandbox = await daytona.create(createParams, { timeout: 120 });
+    const workDir = (await sandbox.getWorkDir()) ?? SANDBOX_APP_ROOT;
+    const preview = await sandbox.getPreviewLink(PREVIEW_PORT);
+    const previewUrl = typeof preview === "string" ? preview : preview.url;
+
+    return { sandboxId: sandbox.id, previewUrl, workDir };
+  }
+
+  /**
    * Execute a shell command in an existing Daytona sandbox.
    * Reattaches to the sandbox by ID via `daytona.get(sandboxId)`.
    * timeoutSeconds is forwarded to executeCommand (Daytona SDK uses seconds).
