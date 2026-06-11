@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const RUN_MJS = path.join(ROOT, "scripts/agent-runner/run.mjs");
+const RUN_MJS_PATH = path.join(ROOT, "scripts/agent-runner/run.mjs");
 
 // Dynamically import the template generator so we can call generate() in-process.
 // The template is plain .mjs — node --test can import it directly.
@@ -28,7 +28,7 @@ const templateUrl = new URL(
 test("run.mjs is byte-identical to the template generator output", async () => {
   const { generate } = await import(templateUrl.href);
   const generated: string = generate(ROOT);
-  const committed = fs.readFileSync(RUN_MJS, "utf8");
+  const committed = fs.readFileSync(RUN_MJS_PATH, "utf8");
   assert.equal(
     generated,
     committed,
@@ -42,17 +42,35 @@ test("run.mjs is byte-identical to the template generator output", async () => {
 
 test("run.mjs passes node --check (valid JavaScript syntax)", () => {
   // execFileSync throws if node --check exits non-zero.
-  execFileSync(process.execPath, ["--check", RUN_MJS], {
+  execFileSync(process.execPath, ["--check", RUN_MJS_PATH], {
     stdio: "pipe",
     timeout: 10_000,
   });
 });
 
 test("run.mjs --self-test exits 0 (pure-logic smoke check)", () => {
-  const result = execFileSync(process.execPath, [RUN_MJS, "--self-test"], {
+  const result = execFileSync(process.execPath, [RUN_MJS_PATH, "--self-test"], {
     stdio: "pipe",
     timeout: 15_000,
   });
   // Output should mention "passed"
   assert.match(result.toString(), /Self-test:.*passed/);
+});
+
+test("runnerArtifact.ts RUN_MJS matches scripts/agent-runner/run.mjs byte-for-byte", async () => {
+  // Dynamically import the artifact (it's a .ts file, strip-types handles it)
+  const artifactUrl = new URL(
+    "file://" + path.join(ROOT, "convex/lib/agentRunner/runnerArtifact.ts"),
+  );
+  const { RUN_MJS: runMjsContents } = await import(artifactUrl.href);
+  const committed = fs.readFileSync(RUN_MJS_PATH, "utf8");
+  assert.equal(
+    runMjsContents,
+    committed,
+    [
+      "convex/lib/agentRunner/runnerArtifact.ts is out of sync.",
+      "Regenerate with:",
+      "  node scripts/lib/agentRunnerTemplate.mjs",
+    ].join("\n"),
+  );
 });

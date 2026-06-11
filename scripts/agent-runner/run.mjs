@@ -363,6 +363,13 @@ function normalizeMirrorPath(rawPath, appCwd) {
   return p;
 }
 
+// ── Runner constants (module-level — accessible from self-test and run()) ─────
+const APP_CWD = "/home/daytona/expo-app";
+const MAX_TSC_CYCLES = 4;
+const BUNDLE_PROBE_URL = "http://localhost:8081/index.bundle?platform=web&dev=true";
+const METRO_POLL_INTERVAL_MS = 3_000;
+const METRO_POLL_MAX_MS = 90_000;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SELF-TEST (--self-test flag — no network, no SDK)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -471,6 +478,11 @@ async function runSelfTests() {
   // PostToolUse Write does NOT mirror paths outside cwd
   await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "/tmp/secret.txt", content: "x" } });
   assert(!mirrored.has("/tmp/secret.txt"), "PostToolUse Write does NOT mirror /tmp paths");
+
+  // Metro constants
+  assert(typeof BUNDLE_PROBE_URL === "string" && BUNDLE_PROBE_URL.includes("index.bundle"), "BUNDLE_PROBE_URL defined and looks like a bundle URL");
+  assert(METRO_POLL_MAX_MS === 90_000, "METRO_POLL_MAX_MS is 90s");
+  assert(METRO_POLL_INTERVAL_MS === 3_000, "METRO_POLL_INTERVAL_MS is 3s");
 
   // system prompt option
   const sysOpt = buildSystemPromptOption("classic", "");
@@ -621,7 +633,8 @@ async function flushDelta() {
 // ── tsc verify (runs locally inside the sandbox box) ─────────────────────────
 // tsc is invoked with execSync — it's a local process, no bridge round-trip.
 
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
+import fs from "node:fs";
 
 function runTscLocally(cwd) {
   try {
@@ -649,9 +662,6 @@ function runTscLocally(cwd) {
 //     { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
 //                             permissionDecisionReason: '...' } }
 //   matcher?: string — matched against tool_name; omit to match all tools
-
-const APP_CWD = "/home/daytona/expo-app";
-const MAX_TSC_CYCLES = 4;
 
 /**
  * Build the SDK-correct hooks config for the agent query.
@@ -882,11 +892,68 @@ async function run() {
     const { hasErrors: finalErrors } = runTscLocally(APP_CWD);
     console.log(`[runner] final tsc: hasErrors=${finalErrors}`);
 
+    // ── Metro: kill any lingering expo start ─────────────────────────────────
+    try {
+      execSync("pkill -f 'expo start' || true", { cwd: APP_CWD, stdio: "pipe", timeout: 5_000 });
+    } catch { /* pkill not found or no match — harmless */ }
+
+    // ── Metro: spawn detached (survives run.mjs exit) ────────────────────────
+    let metroStarted = false;
+    try {
+      const metroLogFd = fs.openSync("/tmp/metro.log", "a");
+      const metro = spawn(
+        "./node_modules/.bin/expo",
+        ["start", "--web", "--port", "8081"],
+        {
+          cwd: APP_CWD,
+          env: { ...process.env, CI: "1", EXPO_NO_TELEMETRY: "1" },
+          detached: true,
+          stdio: ["ignore", metroLogFd, metroLogFd],
+        },
+      );
+      metro.unref();
+      metroStarted = true;
+      console.log("[runner] Metro spawned detached (pid=" + metro.pid + ")");
+    } catch (err) {
+      console.warn("[runner] Metro spawn failed:", err.message);
+    }
+
+    // ── Bundle probe: poll until Metro serves the web bundle ─────────────────
+    let bundleProbeOk = false;
+
+    if (metroStarted) {
+      console.log("[runner] polling bundle: " + BUNDLE_PROBE_URL);
+      const deadline = Date.now() + METRO_POLL_MAX_MS;
+      while (Date.now() < deadline) {
+        try {
+          const probeRes = await fetch(BUNDLE_PROBE_URL);
+          if (probeRes.ok) {
+            bundleProbeOk = true;
+            console.log("[runner] bundle probe: 200 OK");
+            break;
+          }
+        } catch {
+          // Metro not ready yet
+        }
+        await new Promise((r) => setTimeout(r, METRO_POLL_INTERVAL_MS));
+      }
+      if (!bundleProbeOk) {
+        console.warn("[runner] bundle probe timed out after " + METRO_POLL_MAX_MS + "ms");
+      }
+    }
+
+    const metroNote = metroStarted
+      ? (bundleProbeOk ? "Metro running, bundle OK" : "Metro started but bundle probe timed out")
+      : "Metro failed to start";
+
+    const ok = !finalErrors && bundleProbeOk;
     const report = {
-      ok: !finalErrors,
+      ok,
       summary: finalErrors
-        ? `tsc still has errors after ${tscCycle} repair cycle(s)`
-        : "Agent run complete — tsc clean",
+        ? `tsc still has errors after ${tscCycle} repair cycle(s); ${metroNote}`
+        : ok
+          ? `Agent run complete — tsc clean; ${metroNote}`
+          : `Agent run complete — tsc clean but ${metroNote}`,
       entryScreens: [],
       costUsd: totalCostUsd,
       usage: totalUsage,

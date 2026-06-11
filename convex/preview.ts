@@ -507,6 +507,21 @@ export const launchAgentRunner = internalAction({
       return { launched: false, reason: "no-runner" };
     }
 
+    // Upload the latest run.mjs from runnerArtifact.ts (no more rebakes for runner changes)
+    if (provider.uploadFiles) {
+      try {
+        const { RUN_MJS: runMjsContents } = await import("./lib/agentRunner/runnerArtifact.js");
+        await provider.uploadFiles(
+          sandboxId,
+          [{ path: "run.mjs", contents: runMjsContents }],
+          "/home/daytona/agent-runner",
+        );
+        console.log("[launchAgentRunner] run.mjs uploaded from artifact");
+      } catch (err) {
+        console.warn("[launchAgentRunner] run.mjs artifact upload failed, using baked copy:", String(err).slice(0, 200));
+      }
+    }
+
     // For edits: upload parent files into the fresh sandbox
     if (args.isEdit && provider.uploadFiles) {
       const files = await ctx.runQuery(internal.files.snapshot, { versionId: args.versionId });

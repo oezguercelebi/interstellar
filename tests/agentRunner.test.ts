@@ -850,3 +850,34 @@ test("sweeper: agent row with fresh heartbeat is NOT a candidate", () => {
   const freshHeartbeat = Date.now() - 30 * 1000; // 30s ago
   assert.ok(!isSweeperCandidate({ runner: "agent", agentHeartbeatAt: freshHeartbeat }, staleThreshold));
 });
+
+// ── Metro / bundle probe assertions ──────────────────────────────────────────
+
+test("run.mjs has bundle probe URL (index.bundle?platform=web)", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  assert.match(src, /index\.bundle\?platform=web/);
+  assert.match(src, /METRO_POLL_MAX_MS/);
+  assert.match(src, /bundleProbeOk/);
+});
+
+test("run.mjs spawns Metro detached before bridge.complete", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  assert.match(src, /detached:\s*true/);
+  assert.match(src, /metro\.unref\(\)/);
+  assert.match(src, /metroStarted/);
+});
+
+test("run.mjs sets ok=false when bundle probe times out", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  // ok must be computed from both finalErrors AND bundleProbeOk
+  assert.match(src, /!finalErrors && bundleProbeOk/);
+});
