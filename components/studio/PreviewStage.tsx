@@ -7,7 +7,7 @@ import html2canvas from "html2canvas";
 import { Code2, ExternalLink, QrCode, RefreshCw, RotateCw, Smartphone } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import { isPreviewStale, proxyUrlOf, THUMBNAIL_MAX_BYTES } from "@/lib/previewContract";
+import { isPreviewStale, previewDisplayState, proxyUrlOf, sandboxIdOf, THUMBNAIL_MAX_BYTES, type ProbeResult } from "@/lib/previewContract";
 import { DeviceFrame } from "@/components/DeviceFrame";
 import { InterstellarMark } from "@/components/InterstellarMark";
 import { Segmented } from "@/components/ui/segmented";
@@ -37,31 +37,75 @@ export function PreviewStage({ version }: { version: Doc<"versions"> }) {
     version.index === 0 ? { projectId: version.projectId } : "skip",
   );
 
+  const [probe, setProbe] = useState<ProbeResult>("unknown");
+  const lastProbeRef = useRef<number>(0);
+
   const url = version.previewUrl;
   const building = version.status === "generating" || version.status === "pending";
   // Sandboxes are ephemeral (auto-stop when idle), so an older build's stored URL
   // may point at a stopped/deleted sandbox. "provisioning" = a reopen in flight.
   const provisioning = version.sandboxProvider === "provisioning" || reopening;
-  // Past the 28-min trust window (lib/previewContract), the stored URL is almost
-  // certainly dead — show the asleep state instead of Daytona's warning.
-  const stale = isPreviewStale(version);
+  // Combine the clock prior with a real probe result — probe wins over the 28-min clock.
+  const displayState = previewDisplayState(version, probe);
+  const asleep = displayState === "asleep";
   // Embed through the same-origin proxy (no Daytona warning); fall back to the raw
-  // URL if we can't derive a sandbox id. Don't embed a known-stale URL.
-  const embedUrl = stale ? undefined : proxyUrlOf(version) ?? url;
+  // URL if we can't derive a sandbox id. Don't embed when the sandbox is asleep.
+  const embedUrl = asleep ? undefined : proxyUrlOf(version) ?? url;
   const canReopen = version.status === "ready" && version.sandboxProvider !== "none";
 
-  useEffect(() => setLoaded(false), [url, nonce]);
+  useEffect(() => setLoaded(false), [nonce]);
+  useEffect(() => { setProbe("unknown"); lastProbeRef.current = 0; }, [url]);
   useEffect(() => {
     // Clear the local reopening flag once the backend swaps in a fresh URL.
     if (version.sandboxProvider === "daytona" && url) setReopening(false);
   }, [version.sandboxProvider, url]);
+
+  // Probe the sandbox for real liveness: on mount + on window focus/visibility.
+  // Throttled: at most one probe every 10 s. Only probe daytona sandboxes with a
+  // known id and a ready status. Clock ("unknown") is the interim until the first
+  // probe resolves — no flash of "asleep" if the clock says fresh.
+  useEffect(() => {
+    const sandboxId = sandboxIdOf(version);
+    if (version.status !== "ready" || version.sandboxProvider !== "daytona" || !sandboxId) return;
+
+    async function runProbe() {
+      const sid = sandboxIdOf(version);
+      if (!sid) return;
+      const elapsed = Date.now() - lastProbeRef.current;
+      if (elapsed < 10_000 && lastProbeRef.current !== 0) return;
+      lastProbeRef.current = Date.now();
+      try {
+        const res = await fetch(`/api/preview/${sid}/?livecheck=1`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json() as { alive: boolean };
+          setProbe(data.alive ? "alive" : "dead");
+        }
+      } catch {
+        // Network failure — leave the previous probe state (or "unknown" on first run).
+      }
+    }
+
+    runProbe();
+
+    function onFocus() { void runProbe(); }
+    function onVisibility() { if (document.visibilityState === "visible") void runProbe(); }
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  // Re-run if the sandbox id or status changes (e.g. after a reopen).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version._id, version.status, version.sandboxProvider, version.sandboxId, version.previewUrl]);
 
   // One-shot: screenshot the first build's live preview for the gallery thumbnail.
   // The proxied iframe is same-origin, so we can read its document and rasterize it.
   useEffect(() => {
     if (capturedRef.current) return;
     if (version.index !== 0 || needsThumb !== true) return;
-    if (version.status !== "ready" || !loaded || stale) return;
+    if (version.status !== "ready" || !loaded || asleep) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
     capturedRef.current = true;
@@ -122,7 +166,7 @@ export function PreviewStage({ version }: { version: Doc<"versions"> }) {
       }
     }, 2600);
     return () => clearTimeout(t);
-  }, [loaded, needsThumb, stale, version.index, version.status, version.projectId, setThumbnail]);
+  }, [loaded, needsThumb, asleep, version.index, version.status, version.projectId, setThumbnail]);
 
   async function handleReopen() {
     if (reopening || building) return;
@@ -195,7 +239,7 @@ export function PreviewStage({ version }: { version: Doc<"versions"> }) {
       ) : (
         <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
           <div className="pointer-events-none absolute inset-0 bg-grid opacity-50 [mask-image:radial-gradient(70%_70%_at_50%_45%,black,transparent)]" />
-          {url && !provisioning && !stale && version.status === "ready" && (
+          {url && !provisioning && !asleep && version.status === "ready" && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

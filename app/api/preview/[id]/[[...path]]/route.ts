@@ -44,6 +44,31 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const { id, path } = await ctx.params;
   if (!SANDBOX_ID_RE.test(id)) return new Response("Invalid sandbox id", { status: 400 });
 
+  // Liveness probe: ?livecheck=1 — fetch the sandbox root with a short timeout,
+  // return {alive:boolean}. No bundle caching, no rewriting — just a HEAD-like ping.
+  if (req.nextUrl.searchParams.get("livecheck") === "1") {
+    const origin = sandboxOrigin(id);
+    let alive = false;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch(`${origin}/`, {
+        method: "GET",
+        headers: { "X-Daytona-Skip-Preview-Warning": "true", Accept: "text/html" },
+        redirect: "follow",
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      alive = res.ok || res.status < 500;
+    } catch {
+      alive = false;
+    }
+    return new Response(JSON.stringify({ alive }), {
+      status: 200,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  }
+
   const origin = sandboxOrigin(id);
   const base = `/api/preview/${id}`;
   const subPath = (path ?? []).join("/");

@@ -57,6 +57,40 @@ export function isPreviewStale(version: PreviewVersion, now = Date.now()): boole
 }
 
 /**
+ * Result of a liveness probe against the sandbox.
+ * - "alive"   — sandbox responded (show iframe regardless of previewAt age)
+ * - "dead"    — sandbox did not respond (show asleep state immediately)
+ * - "unknown" — probe not yet complete (fall back to clock-based heuristic)
+ */
+export type ProbeResult = "alive" | "dead" | "unknown";
+
+/**
+ * Display state derived from the clock prior (isPreviewStale) combined with
+ * a real probe result. This is the single source of truth for whether the
+ * iframe should be shown or the asleep/Reopen state should appear.
+ *
+ * Decision table:
+ * | probe   | clock  | display  |
+ * |---------|--------|----------|
+ * | alive   | fresh  | live     |
+ * | alive   | stale  | live     |  ← probe wins over clock
+ * | dead    | fresh  | asleep   |  ← probe wins over clock
+ * | dead    | stale  | asleep   |
+ * | unknown | fresh  | live     |  ← clock as interim (no "asleep" flash)
+ * | unknown | stale  | asleep   |
+ */
+export function previewDisplayState(
+  version: PreviewVersion,
+  probe: ProbeResult,
+  now = Date.now(),
+): "live" | "asleep" {
+  if (probe === "alive") return "live";
+  if (probe === "dead") return "asleep";
+  // unknown — fall back to clock
+  return isPreviewStale(version, now) ? "asleep" : "live";
+}
+
+/**
  * Max bytes for a stored thumbnail dataURL — Convex caps documents at ~1 MiB,
  * so a base64 dataURL must stay well under it.
  */

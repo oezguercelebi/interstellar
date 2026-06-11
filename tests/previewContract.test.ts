@@ -6,10 +6,12 @@ import assert from "node:assert/strict";
 
 import {
   isPreviewStale,
+  previewDisplayState,
   sandboxIdOf,
   proxyUrlOf,
   THUMBNAIL_MAX_BYTES,
   type PreviewVersion,
+  type ProbeResult,
 } from "../lib/previewContract.ts";
 import { buildJsCacheKey } from "../lib/jsCacheKey.ts";
 
@@ -175,6 +177,49 @@ test("G4: bundle request URL produced by shim matches buildJsCacheKey output", (
 test("G4: no previewAt → cache key equals upstream target (legacy/ungated behavior preserved)", () => {
   const target = "https://8081-abcdef12.daytonaproxy01.eu/index.bundle?platform=web";
   assert.equal(buildJsCacheKey(target, null), target);
+});
+
+// ── previewDisplayState ───────────────────────────────────────────────────────
+// Decision table: probe (alive/dead/unknown) × clock (fresh/stale) → live/asleep
+
+const now = 1_000_000_000;
+const freshVersion: PreviewVersion = { sandboxProvider: "daytona", previewAt: now - 1000 }; // fresh
+const staleVersion: PreviewVersion = { sandboxProvider: "daytona", previewAt: now - STALE_MS }; // stale
+
+test("previewDisplayState: probe=alive, clock=fresh → live", () => {
+  assert.equal(previewDisplayState(freshVersion, "alive", now), "live");
+});
+
+test("previewDisplayState: probe=alive, clock=stale → live (probe wins over clock)", () => {
+  assert.equal(previewDisplayState(staleVersion, "alive", now), "live");
+});
+
+test("previewDisplayState: probe=dead, clock=fresh → asleep (probe wins over clock)", () => {
+  assert.equal(previewDisplayState(freshVersion, "dead", now), "asleep");
+});
+
+test("previewDisplayState: probe=dead, clock=stale → asleep", () => {
+  assert.equal(previewDisplayState(staleVersion, "dead", now), "asleep");
+});
+
+test("previewDisplayState: probe=unknown, clock=fresh → live (clock as interim)", () => {
+  assert.equal(previewDisplayState(freshVersion, "unknown", now), "live");
+});
+
+test("previewDisplayState: probe=unknown, clock=stale → asleep (clock as interim)", () => {
+  assert.equal(previewDisplayState(staleVersion, "unknown", now), "asleep");
+});
+
+test("previewDisplayState: non-daytona provider, probe=dead → live (isPreviewStale=false for non-daytona)", () => {
+  // Non-daytona: isPreviewStale returns false → clock fallback says live.
+  // probe=dead still wins and says asleep.
+  const v: PreviewVersion = { sandboxProvider: "e2b", previewAt: now - STALE_MS * 2 };
+  assert.equal(previewDisplayState(v, "dead", now), "asleep");
+});
+
+test("previewDisplayState: non-daytona provider, probe=unknown → live (clock=false for non-daytona)", () => {
+  const v: PreviewVersion = { sandboxProvider: "e2b", previewAt: now - STALE_MS * 2 };
+  assert.equal(previewDisplayState(v, "unknown", now), "live");
 });
 
 // ── THUMBNAIL_MAX_BYTES ───────────────────────────────────────────────────────
