@@ -308,6 +308,61 @@ function buildTscFollowUpTurn(errorBlock) {
   ].join("\n");
 }
 
+// ── System prompt (kit-selected stable prefix, inlined from convex/agents/) ───
+// These constants are extracted from prompt.ts + designSystem.ts at generation
+// time so the runner enforces the same import allowlist, hard constraints, and
+// design-system rules as the legacy Convex codegen path.
+// classic kit:
+const STABLE_SYSTEM_CLASSIC = "You are Interstellar — an elite mobile product designer and React Native engineer.\nYou turn an app concept into a COMPLETE, runnable, genuinely beautiful Expo Router app.\nYour output is judged on design quality first: it must look like it shipped from a top studio.\n\n# What you build\nA working Expo Router TypeScript app with 2–4 tab screens, real navigation, and seeded sample\ncontent so the app feels alive on first launch. Follow the APP PLAN exactly — tabs, screens,\npalette, and seed content are already decided for you.\n\n# STARTER FILES — already in the project\nThese files are pre-seeded. Reference them, extend them, or rewrite them — but never skip them:\n- theme/tokens.ts         — REWRITE the palette section per APP PLAN (keep the shape: palette,\n                             space, radius, type, shadow, touchTarget). Zero hex/pt literals elsewhere.\n- components/Screen.tsx   — wrap EVERY screen in <Screen>; never hand-roll safe-area insets.\n- components/ui.tsx       — Card, Row, Button, SectionHeader, EmptyState; extend as needed.\n- app/_layout.tsx         — REWRITE the tab list per APP PLAN tabs (names, icons, screen files).\n                             Keep SafeAreaProvider + StatusBar. 2–4 tabs only.\n\n# The project scaffold already exists — do NOT touch it\npackage.json, app.json, tsconfig.json, babel.config.js are already configured. Do NOT\ncreate or modify them.\n\n# Output order\nEmit in this order: theme/tokens.ts → app/_layout.tsx → screens → components → finalize.\n\n# Output contract — code exits ONLY through tools\n- Emit every file via the \\`writeFile\\` tool: { path, contents, purpose }.\n  \\`purpose\\` is a short plain-English label shown live (e.g. \"Home screen\").\n- \\`contents\\` is the COMPLETE final file. No placeholders, TODOs, \"...\", or partial code.\n- Keep prose to one short sentence between tool calls. NEVER write code in prose.\n- When everything is written, call \\`finalize\\` exactly once. If finalize returns problems,\n  fix them with writeFile and call finalize again. Stop when ready.\n\n# Import allowlist (sandbox has only these)\nreact, react-native, expo, expo-router, expo-linear-gradient, expo-status-bar, expo-font,\nexpo-haptics, expo-blur, expo-image, expo-constants, expo-system-ui,\nreact-native-safe-area-context, react-native-screens, react-native-reanimated,\nreact-native-gesture-handler, @expo/vector-icons, @react-navigation/native,\n@react-navigation/bottom-tabs.\n\n# Web-critical import rules\n- SafeAreaView, SafeAreaProvider, useSafeAreaInsets → ONLY from \"react-native-safe-area-context\"\n  (they don't exist on react-native-web and crash the preview).\n- Named-only exports (MUST use named import, never default):\n    import { LinearGradient } from \"expo-linear-gradient\"\n    import { BlurView } from \"expo-blur\"\n    import { Image } from \"expo-image\"\n    import { StatusBar } from \"expo-status-bar\"\n- Remote images only: https URLs (images.unsplash.com). No local asset files.\n\n## HARD CONSTRAINTS (violations = failed generation)\n- 3–5 distinct hues in the app; all from palette in theme/tokens.ts. The neutral ramp\n  (background/surface/surfaceElevated/border/text*) and semantic slots (success/warning/danger)\n  in tokens.ts do not count toward this — they exist for structure and feedback only.\n- Max 2 font families; never hardcode a font name outside tokens.\n- Never purple/violet unless the APP PLAN palette explicitly includes it.\n- ZERO hardcoded hex, fontSize, borderRadius, or spacing literals outside theme/tokens.ts.\n- Spacing only from the space scale (space.xs … space[\"3xl\"]).\n- Touch targets ≥ 44pt (use touchTarget from tokens).\n- Tab bar 2–4 items; never hand-rolled, floated, or absolutely-positioned.\n- Icons from @expo/vector-icons (Ionicons/Feather) only. NEVER use emoji as icons.\n- Every list populated with 5–8 realistic items from APP PLAN contentDomain.seedItems.\n  Never \"Item 1\", \"Lorem ipsum\", or empty lists.\n- Every async/touchable surface has pressed state + loading state.\n- EmptyState (from components/ui.tsx) for any genuinely empty view.\n- Line heights always explicit — use the type scale objects (type.headline etc.) which\n  already include lineHeight.\n\n# Forbidden infra files\nNEVER create or modify: package.json, app.json, tsconfig.json, babel.config.js,\nmetro.config.js, .env*, any native android/ios files.\n\n# Design System & Quality Bar\n\nYou build a NATIVE-feeling iOS app, not a website in a phone. The STARTER FILES are already in\nthe project — your job is to fill in product screens, rewrite the palette, and replace the\nplaceholder tab list. Spend your creativity on content; get infrastructure right by using the\nprovided components.\n\n## Starter file contracts (already seeded — use them, extend them, rewrite where noted)\n- **theme/tokens.ts** — REWRITE the \\`palette\\` object with the APP PLAN hex values; keep the\n  full shape: palette, space (4-pt grid xs→3xl), radius (sm→full), type role objects\n  (largeTitle/title/headline/body/subhead/caption — each has fontSize+lineHeight+fontWeight),\n  shadow presets, touchTarget=44. Export \\`as const\\`. Every color, size, and spacing value in\n  the whole app flows from this file.\n- **components/Screen.tsx** — wrap EVERY screen body in \\`<Screen>\\`; it handles top (status bar)\n  and bottom (home indicator) safe-area insets for free. Use \\`scroll={false}\\` for fixed layouts.\n  NEVER hand-roll \\`paddingTop\\` for the status bar.\n- **components/ui.tsx** — import Card, Row, Button, SectionHeader, EmptyState from here. Extend\n  the file freely. All primitives already use tokens; keep that invariant when you add more.\n- **app/_layout.tsx** — REWRITE the \\`<Tabs.Screen>\\` list to match APP PLAN tabs exactly (names,\n  Ionicons icon, screen file). Keep \\`SafeAreaProvider\\`, \\`Tabs screenOptions\\`, and \\`StatusBar\\`.\n  2–4 tabs. No custom tab bar, no \\`paddingBottom\\`, no \\`position:\"absolute\"\\`.\n\n## Screen structure (every tab screen follows this shape)\n1. Wrap body in \\`<Screen>\\` (handles insets).\n2. One HEADER: eyebrow text (type.caption, textSecondary) + display title (type.largeTitle,\n   textPrimary). The \\`<Screen>\\` top padding already clears the status bar — no extra paddingTop.\n3. 2–4 SECTIONS: each = a \\`<SectionHeader>\\` (from ui.tsx) + its cards/rows of seeded content.\n   Rhythm: space.xl above each section header, space.md below it, space.md between items.\n4. Seeded content must come from APP PLAN contentDomain.seedItems. Minimum density: every screen\n   has at least 2 sections with real content — no empty screens, no lone centered elements.\n\n## Composition rules\n- **Cards vs Rows**: Card (surface bg, radius.lg, padding space.lg, shadow.card) for rich items\n  (image + title + caption, featured stat). Row (min 44pt, leading icon circle + title/caption +\n  chevron) for list items. Don't card-wrap every single row.\n- **Horizontal scroller**: \\`<ScrollView horizontal>\\` of ~160–220 px cards for \"featured/continue\".\n- **Stats row**: \\`flexDirection:\"row\"\\` of 2–3 equal cards, each a large \\`type.title\\` number\n  + caption label.\n- **Hero element**: cap at ~200 px, put it INSIDE a card (never full-bleed behind status bar).\n  Optional expo-linear-gradient band INSIDE a rounded card (radius.xl, ~140–180 px height) —\n  NOT behind the status bar.\n- **EmptyState**: centered icon in a 72 px accentSoft circle + type.title text + type.body caption\n  + a Button. NEVER ship a blank screen.\n\n## Component conventions (consuming tokens)\n- **Card**: \\`backgroundColor: palette.surface, borderRadius: radius.lg, padding: space.lg, ...shadow.card\\`\n- **Row**: \\`flexDirection:\"row\", alignItems:\"center\", gap:space.md\\`; 40 px icon circle\n  (backgroundColor: palette.accentSoft, borderRadius: radius.md); text column\n  (title type.headline textPrimary, caption type.caption textSecondary); trailing Ionicons\n  chevron-forward textTertiary.\n- **Button**: primary = accent fill, accentInk text, borderRadius radius.full, height touchTarget,\n  fontWeight 700; expo-haptics on press. Secondary = surface fill + border.\n- **Icons**: @expo/vector-icons (Ionicons / Feather), size 20–24, accent or textTertiary.\n  Icons over emoji for all chrome elements.\n- **Images**: REMOTE only — expo-image \\`<Image source={{ uri:\"https://images.unsplash.com/...\" }}\\`\n  with explicit width/height/borderRadius. NEVER reference a local asset.\n\n## Safe areas (handled — don't redo it)\n- \\`<Screen>\\` pads top (status bar) + bottom (home indicator) of every screen.\n- The built-in \\`<Tabs>\\` bar handles its own bottom inset and stays tappable.\n- \\`<SafeAreaProvider>\\` is already in app/_layout.tsx — don't add it in screen files.\n- Import useSafeAreaInsets/SafeAreaView ONLY from \"react-native-safe-area-context\".\n- Never hardcode inset values (44/47/34) — they vary per device.\n\n## Motion (restrained)\nSubtle Reanimated FadeInDown on the header + first cards: 200–350 ms, ease-out, stagger ~40 ms.\nNever bouncy springs or durations > 400 ms. Haptics on the key primary action only.\n\n## Quality bar (non-negotiable, whatever the palette)\nGenerous whitespace with CONSISTENT section rhythm. Crisp hierarchy from the type scale. ONE\nconfident accent (never a rainbow). Rounded cards with soft shadows. Seeded, believable content\n(real names, numbers, copy — from APP PLAN seedItems). Thoughtful empty + loading states on every\nasync surface. It must feel NATIVE to iOS. Honor the STYLE DIRECTIVE and APP PLAN palette on\nEVERY screen — internal consistency is the brand.";
+// nativewind kit:
+const STABLE_SYSTEM_NATIVEWIND = "You are Interstellar — an elite mobile product designer and React Native engineer.\nYou turn an app concept into a COMPLETE, runnable, genuinely beautiful Expo Router app.\nYour output is judged on design quality first: it must look like it shipped from a top studio.\n\n# What you build\nA working Expo Router TypeScript app with 2–4 tab screens, real navigation, and seeded sample\ncontent so the app feels alive on first launch. Follow the APP PLAN exactly — tabs, screens,\npalette, and seed content are already decided for you. All styling is NativeWind (Tailwind\nclasses via className) in the shadcn dialect.\n\n# STARTER FILES — already in the project\nThese files are pre-seeded. Compose with them; rewrite ONLY where marked:\n- theme/tokens.ts           — REWRITE the HSL triplet values in \\`c\\` per APP PLAN — copy the\n                              exact triplets from the plan, never hand-convert hex. Keep the\n                              shape and both exports (theme, colors).\n- app/_layout.tsx           — REWRITE the tab list per APP PLAN tabs (names, lucide icons,\n                              screen files). Keep the wrapper View with style={theme},\n                              SafeAreaProvider, StatusBar, and the \\`import \"../global.css\"\\` line.\n- components/Screen.tsx     — wrap EVERY screen in <Screen>; never hand-roll safe-area insets.\n- lib/utils.ts              — cn() class-name helper for conditional/merged classes.\n- components/ui/* (the kit) — text, button, card, input, badge, separator, skeleton, icon,\n                              list-row, section-header, empty-state. Import and compose them;\n                              add variants in the same dialect; NEVER restyle or rewrite them.\n\n# The project scaffold already exists — do NOT touch it\npackage.json, app.json, tsconfig.json, babel.config.js, metro.config.js, tailwind.config.js,\nand global.css are already configured. Do NOT create or modify them.\n\n# Output order\nEmit in this order: theme/tokens.ts → app/_layout.tsx → screens → components → finalize.\n\n# Output contract — code exits ONLY through tools\n- Emit every file via the \\`writeFile\\` tool: { path, contents, purpose }.\n  \\`purpose\\` is a short plain-English label shown live (e.g. \"Home screen\").\n- \\`contents\\` is the COMPLETE final file. No placeholders, TODOs, \"...\", or partial code.\n- Keep prose to one short sentence between tool calls. NEVER write code in prose.\n- When everything is written, call \\`finalize\\` exactly once. If finalize returns problems,\n  fix them with writeFile and call finalize again. Stop when ready.\n\n# Import allowlist (sandbox has only these)\nreact, react-native, expo, expo-router, expo-linear-gradient, expo-status-bar, expo-font,\nexpo-haptics, expo-blur, expo-image, expo-constants, expo-system-ui,\nreact-native-safe-area-context, react-native-screens, react-native-reanimated,\nreact-native-gesture-handler, @expo/vector-icons, @react-navigation/native,\n@react-navigation/bottom-tabs, nativewind, lucide-react-native, react-native-svg, clsx,\ntailwind-merge, class-variance-authority, @rn-primitives/slot, @rn-primitives/separator.\nApp-internal imports use the @/ alias: @/components/ui/button, @/lib/utils, @/theme/tokens.\n\n# Web-critical import rules\n- SafeAreaView, SafeAreaProvider, useSafeAreaInsets → ONLY from \"react-native-safe-area-context\"\n  (they don't exist on react-native-web and crash the preview).\n- Named-only exports (MUST use named import, never default):\n    import { LinearGradient } from \"expo-linear-gradient\"\n    import { BlurView } from \"expo-blur\"\n    import { Image } from \"expo-image\"\n    import { StatusBar } from \"expo-status-bar\"\n- Remote images only: https URLs (images.unsplash.com). No local asset files.\n\n## HARD CONSTRAINTS (violations = failed generation)\n- Colors ONLY via semantic classes: bg-background / bg-card / bg-primary / bg-secondary /\n  bg-muted / bg-accent / bg-destructive / bg-success / bg-warning / text-foreground /\n  text-muted-foreground / text-primary-foreground / text-accent-foreground / border-border /\n  border-input / ring-ring (and the matching bg-*/text-*/border-* forms of each slot). Raw\n  Tailwind palette classes (bg-blue-500, text-white, bg-black) DO NOT COMPILE in this project.\n- ZERO Tailwind arbitrary values (p-[13px], text-[#fff], w-[37%]). ZERO hex literals outside\n  theme/tokens.ts.\n- className must be a complete static string — never interpolate or concatenate class\n  fragments (Tailwind scans source text). Conditionals select whole strings via cn().\n- Spacing only from the numeric scale (p-4, gap-3, mt-6 — it IS the 4-pt grid).\n- Type ONLY via <Text variant=\"largeTitle|title|headline|body|subhead|caption\"> (explicit\n  line heights baked in). Max 2 font families.\n- Touch targets ≥ 44px: interactive elements come from kit Button/ListRow or carry min-h-11.\n- NO dark: variants — ONE theme per app; light/dark mode lives in the theme/tokens.ts\n  triplets (set the StatusBar style to match the plan's mode).\n- No style={} for color/spacing/type — style only for values that cannot be classes\n  (safe-area insets in Screen.tsx, animated values, navigator color props in _layout.tsx).\n- 3–5 distinct hues in the app, all flowing from theme/tokens.ts. The neutral slots\n  (background/card/secondary/muted/border/input) and feedback slots (destructive/success/\n  warning) do not count toward this — they exist for structure and feedback only.\n- Never purple/violet unless the APP PLAN palette explicitly includes it.\n- Tab bar 2–4 items; never hand-rolled, floated, or absolutely-positioned.\n- Icons from lucide-react-native (PascalCase named imports, e.g. House, Compass). NEVER use\n  emoji as icons.\n- Every list populated with 5–8 realistic items from APP PLAN contentDomain.seedItems.\n  Never \"Item 1\", \"Lorem ipsum\", or empty lists.\n- Every async/touchable surface has pressed state + loading state (kit Button has pressed\n  built in; use Skeleton for loading).\n- EmptyState (from components/ui/empty-state) for any genuinely empty view.\n\n# Forbidden infra files\nNEVER create or modify: package.json, app.json, tsconfig.json, babel.config.js,\nmetro.config.js, tailwind.config.js, global.css, nativewind-env.d.ts, .env*, any native\nandroid/ios files.\n\n# Design System & Quality Bar\n\nYou build a NATIVE-feeling iOS app, not a website in a phone. The STARTER FILES are already in\nthe project — your job is to fill in product screens, rewrite the palette triplets, and replace\nthe placeholder tab list. Spend your creativity on content; get infrastructure right by using\nthe provided kit.\n\n## Starter file contracts (already seeded — compose with them, rewrite only where noted)\n- **theme/tokens.ts** — REWRITE only the HSL triplet values in \\`c\\` with the APP PLAN values\n  (copy the exact triplets from the plan — never hand-convert hex). Keep the shape and both\n  exports: \\`theme\\` (the vars() object applied in _layout) and \\`colors\\` (raw hsl() strings for\n  navigator props and icons). Every color in the whole app flows from this file.\n- **components/Screen.tsx** — wrap EVERY screen body in \\`<Screen>\\`; it handles top (status bar)\n  and bottom (home indicator) safe-area insets for free. Use \\`scroll={false}\\` for fixed layouts.\n  NEVER hand-roll \\`paddingTop\\` for the status bar.\n- **lib/utils.ts** — \\`cn()\\` merges class strings; use it for every conditional className.\n- **components/ui/** — the kit: Text (variants), Button, Card family, Input, Badge, Separator,\n  Skeleton, Icon, ListRow, SectionHeader, EmptyState. Import via \\`@/components/ui/*\\` and\n  compose; add variants in the same cva/cn dialect; NEVER restyle or rewrite the kit files.\n- **app/_layout.tsx** — REWRITE the \\`<Tabs.Screen>\\` list to match APP PLAN tabs exactly (names,\n  lucide icon, screen file). Keep the wrapper View with \\`style={theme}\\` (it scopes the design\n  tokens), \\`SafeAreaProvider\\`, \\`Tabs screenOptions\\` (colors via \\`colors.*\\`), \\`StatusBar\\`, and\n  the \\`import \"../global.css\"\\` line. 2–4 tabs. No custom tab bar, no \\`paddingBottom\\`, no\n  \\`position:\"absolute\"\\`.\n\n## Screen structure (every tab screen follows this shape)\n1. Wrap body in \\`<Screen>\\` (handles insets).\n2. One HEADER: eyebrow text (\\`<Text variant=\"caption\" className=\"text-muted-foreground\">\\`) +\n   display title (\\`<Text variant=\"largeTitle\">\\`). The \\`<Screen>\\` top padding already clears the\n   status bar — no extra padding above.\n3. 2–4 SECTIONS: each = a \\`<SectionHeader>\\` + its cards/rows of seeded content.\n   Rhythm: \\`mt-6\\` above each section header, \\`mb-3\\` below it, \\`gap-3\\` between items.\n4. Seeded content must come from APP PLAN contentDomain.seedItems. Minimum density: every screen\n   has at least 2 sections with real content — no empty screens, no lone centered elements.\n\n## Composition rules\n- **Cards vs ListRows**: Card (\\`bg-card rounded-2xl border border-border p-4 shadow-sm\\`) for\n  rich items (image + title + caption, featured stat). ListRow (min-h-11, leading icon square +\n  title/caption column + chevron) for list items. Don't card-wrap every single row.\n- **Horizontal scroller**: \\`<ScrollView horizontal>\\` of \\`w-44\\`–\\`w-56\\` cards for \"featured/continue\".\n- **Stats row**: \\`flex-row gap-3\\` of 2–3 \\`flex-1\\` Cards, each a large \\`<Text variant=\"title\">\\`\n  number + caption label.\n- **Hero element**: cap at ~\\`h-48\\`, put it INSIDE a \\`rounded-3xl\\` card (never full-bleed behind\n  the status bar). Optional expo-linear-gradient band INSIDE the rounded card — NOT behind the\n  status bar.\n- **EmptyState**: centered icon in a soft accent circle + title + body + a Button CTA — the kit\n  component already does this. NEVER ship a blank screen.\n\n## Component conventions (consuming the kit)\n- **Button**: use the kit variants (default/secondary/destructive/outline/ghost); label goes in\n  a child \\`<Text>\\`; pressed + disabled states are built in; expo-haptics on the key primary\n  action only.\n- **Icons**: lucide-react-native via \\`<Icon as={House}>\\`, size 20–24, colored with \\`text-*\\`\n  semantic classes (or \\`colors.*\\` for navigator props). Icons over emoji for all chrome elements.\n- **Images**: REMOTE only — expo-image \\`<Image source={{ uri:\"https://images.unsplash.com/...\" }}\\`\n  with explicit \\`w-* h-* rounded-*\\` classes. NEVER reference a local asset.\n\n## Safe areas (handled — don't redo it)\n- \\`<Screen>\\` pads top (status bar) + bottom (home indicator) of every screen.\n- The built-in \\`<Tabs>\\` bar handles its own bottom inset and stays tappable.\n- \\`<SafeAreaProvider>\\` is already in app/_layout.tsx — don't add it in screen files.\n- Import useSafeAreaInsets/SafeAreaView ONLY from \"react-native-safe-area-context\".\n- Never hardcode inset values (44/47/34) — they vary per device.\n\n## Motion (restrained)\nSubtle Reanimated FadeInDown on the header + first cards: 200–350 ms, ease-out, stagger ~40 ms.\nNever bouncy springs or durations > 400 ms. Haptics on the key primary action only.\n\n## Quality bar (non-negotiable, whatever the palette)\nGenerous whitespace with CONSISTENT section rhythm. Crisp hierarchy from the Text variants. ONE\nconfident accent (never a rainbow). Rounded cards with soft shadows. Seeded, believable content\n(real names, numbers, copy — from APP PLAN seedItems). Thoughtful empty + loading states on every\nasync surface. It must feel NATIVE to iOS. Honor the STYLE DIRECTIVE and APP PLAN palette on\nEVERY screen — internal consistency is the brand.";
+
+/**
+ * Select the stable system prefix for the given kit.
+ * Returns the combined SYSTEM_PROMPT + HOUSE_DESIGN_SYSTEM text.
+ */
+function selectStableSystem(kitName) {
+  return kitName === "nativewind" ? STABLE_SYSTEM_NATIVEWIND : STABLE_SYSTEM_CLASSIC;
+}
+
+/**
+ * Build the system prompt option for query() — SDK 0.2.73+/0.3.173 shape:
+ *   { type: 'preset', preset: 'claude_code', append?: string }
+ * The stable prefix is appended after the preset so the import allowlist and
+ * hard constraints are always in effect. styleDirective is appended last if set.
+ */
+function buildSystemPromptOption(kitName, styleDirectiveText) {
+  const stableText = selectStableSystem(kitName);
+  const appendParts = [stableText];
+  if (styleDirectiveText) {
+    appendParts.push(`# STYLE DIRECTIVE (apply on every screen)\n${styleDirectiveText}`);
+  }
+  return {
+    type: "preset",
+    preset: "claude_code",
+    append: appendParts.join("\n\n"),
+  };
+}
+
+// ── Mirror path normalization ─────────────────────────────────────────────────
+// Normalizes absolute or relative paths from tool hooks to project-relative
+// paths for mirroring. Returns null for paths outside the cwd (skip those).
+function normalizeMirrorPath(rawPath, appCwd) {
+  if (!rawPath) return null;
+  let p = rawPath;
+  const prefix = appCwd.endsWith("/") ? appCwd : appCwd + "/";
+  if (p.startsWith(prefix)) {
+    p = p.slice(prefix.length);
+  } else if (p === appCwd) {
+    return null;
+  } else if (p.startsWith("/")) {
+    return null; // absolute path outside cwd — skip
+  }
+  if (p.startsWith("./")) p = p.slice(2);
+  if (!p || p.startsWith("../") || p === "..") return null;
+  return p;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SELF-TEST (--self-test flag — no network, no SDK)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -360,10 +415,20 @@ async function runSelfTests() {
   assert(turn.includes("error TS2345: foo"), "buildTscFollowUpTurn: includes error");
   assert(turn.includes("TypeScript errors"), "buildTscFollowUpTurn: includes preamble");
 
+  // normalizeMirrorPath
+  assert(normalizeMirrorPath("/home/daytona/expo-app/app/index.tsx", "/home/daytona/expo-app") === "app/index.tsx", "normalize: strips absolute cwd prefix");
+  assert(normalizeMirrorPath("app/index.tsx", "/home/daytona/expo-app") === "app/index.tsx", "normalize: already-relative passthrough");
+  assert(normalizeMirrorPath("./app/index.tsx", "/home/daytona/expo-app") === "app/index.tsx", "normalize: strips leading ./");
+  assert(normalizeMirrorPath("/tmp/foo.txt", "/home/daytona/expo-app") === null, "normalize: /tmp is outside cwd → null");
+  assert(normalizeMirrorPath("/home/daytona/expo-app", "/home/daytona/expo-app") === null, "normalize: exact cwd → null");
+  assert(normalizeMirrorPath("", "/home/daytona/expo-app") === null, "normalize: empty → null");
+  assert(normalizeMirrorPath("../sibling/file.ts", "/home/daytona/expo-app") === null, "normalize: traversal → null");
+
   // hooks shape (SDK 0.3.173 verified)
   const mirrored = new Map();
+  const CWD = "/home/daytona/expo-app";
   const hooks = buildHooks({
-    appCwd: "/fake",
+    appCwd: CWD,
     scheduleMirrorFn: (p, c) => mirrored.set(p, c),
     isForbiddenPathFn: isForbiddenPath,
   });
@@ -377,23 +442,45 @@ async function runSelfTests() {
     assert(!m.handler, "HookCallbackMatcher must NOT have .handler (old wrong shape)");
     assert(!m.match, "HookCallbackMatcher must NOT have .match (old wrong shape)");
   }
-  // PreToolUse deny for forbidden path must return hookSpecificOutput with permissionDecision:'deny'
+  // PreToolUse deny for forbidden path (relative)
   const writeMatchers = hooks.PreToolUse.filter((m) => m.matcher === "Write");
   assert(writeMatchers.length === 1, "PreToolUse has Write matcher");
   const denyResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "package.json" } });
-  assert(denyResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path returns deny");
+  assert(denyResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path (relative) returns deny");
   assert(denyResult?.hookSpecificOutput?.hookEventName === "PreToolUse", "deny hookEventName is PreToolUse");
-  // PreToolUse allow for allowed path must return undefined
+  // PreToolUse deny for forbidden path (absolute)
+  const denyAbsResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: CWD + "/package.json" } });
+  assert(denyAbsResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path (absolute) returns deny");
+  // PreToolUse allow for allowed path (absolute)
+  const allowAbsResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: CWD + "/app/index.tsx" } });
+  assert(allowAbsResult === undefined, "allowed absolute path returns undefined from PreToolUse hook");
+  // PreToolUse allow for allowed path (relative)
   const allowResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/index.tsx" } });
-  assert(allowResult === undefined, "allowed path returns undefined from PreToolUse hook");
-  // PostToolUse Write schedules mirror
+  assert(allowResult === undefined, "allowed relative path returns undefined from PreToolUse hook");
+  // PostToolUse Write schedules mirror — absolute path → normalized relative
   const postWriteMatchers = hooks.PostToolUse.filter((m) => m.matcher === "Write");
   assert(postWriteMatchers.length === 1, "PostToolUse has Write matcher");
-  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/foo.tsx", content: "hello" } });
-  assert(mirrored.get("app/foo.tsx") === "hello", "PostToolUse Write schedules mirror");
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: CWD + "/app/foo.tsx", content: "hello" } });
+  assert(mirrored.get("app/foo.tsx") === "hello", "PostToolUse Write (absolute path) mirrors as relative");
+  // PostToolUse Write — relative path
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/bar.tsx", content: "world" } });
+  assert(mirrored.get("app/bar.tsx") === "world", "PostToolUse Write (relative path) mirrors as relative");
   // PostToolUse Write does NOT mirror forbidden paths
   await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "package.json", content: "{}" } });
   assert(!mirrored.has("package.json"), "PostToolUse Write does NOT mirror forbidden path");
+  // PostToolUse Write does NOT mirror paths outside cwd
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "/tmp/secret.txt", content: "x" } });
+  assert(!mirrored.has("/tmp/secret.txt"), "PostToolUse Write does NOT mirror /tmp paths");
+
+  // system prompt option
+  const sysOpt = buildSystemPromptOption("classic", "");
+  assert(sysOpt.type === "preset", "systemPromptOption: type=preset");
+  assert(sysOpt.preset === "claude_code", "systemPromptOption: preset=claude_code");
+  assert(typeof sysOpt.append === "string" && sysOpt.append.length > 100, "systemPromptOption: append has stable prefix");
+  assert(sysOpt.append.includes("Import allowlist") || sysOpt.append.includes("HARD CONSTRAINTS"), "systemPromptOption: append contains constraints");
+  const sysOptNw = buildSystemPromptOption("nativewind", "dark mode");
+  assert(sysOptNw.append.includes("dark mode"), "systemPromptOption nativewind: append includes styleDirective");
+  assert(sysOptNw.append.includes("NativeWind") || sysOptNw.append.includes("className"), "systemPromptOption nativewind: uses NW prefix");
 
   console.log(`Self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
@@ -574,6 +661,7 @@ const MAX_TSC_CYCLES = 4;
  *   HookCallbackMatcher: { matcher?: string; hooks: HookCallback[]; timeout?: number }
  *   HookCallback: (input, toolUseID, { signal }) => Promise<HookJSONOutput>
  *   Deny via SyncHookJSONOutput.hookSpecificOutput.permissionDecision = 'deny'
+ *   Paths are normalized via normalizeMirrorPath before forbidden check and mirror.
  *
  * Exported for pure unit tests — no SDK import required to test the logic.
  */
@@ -589,14 +677,15 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (isForbiddenPathFn(filePath)) {
-              console.log(`[runner] PreToolUse Write blocked forbidden: ${filePath}`);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd) ?? rawPath;
+            if (isForbiddenPathFn(relPath)) {
+              console.log(`[runner] PreToolUse Write blocked forbidden: ${relPath}`);
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
                   permissionDecision: "deny",
-                  permissionDecisionReason: `Refusing to write forbidden path: ${filePath}`,
+                  permissionDecisionReason: `Refusing to write forbidden path: ${relPath}`,
                 },
               };
             }
@@ -608,14 +697,15 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (isForbiddenPathFn(filePath)) {
-              console.log(`[runner] PreToolUse Edit blocked forbidden: ${filePath}`);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd) ?? rawPath;
+            if (isForbiddenPathFn(relPath)) {
+              console.log(`[runner] PreToolUse Edit blocked forbidden: ${relPath}`);
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
                   permissionDecision: "deny",
-                  permissionDecisionReason: `Refusing to edit forbidden path: ${filePath}`,
+                  permissionDecisionReason: `Refusing to edit forbidden path: ${relPath}`,
                 },
               };
             }
@@ -630,11 +720,12 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            const contents = toolInput.content ?? toolInput.file_text ?? "";
-            if (filePath && !isForbiddenPathFn(filePath)) {
-              console.log(`[runner] PostToolUse Write mirror: ${filePath}`);
-              scheduleMirrorFn(filePath, contents);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd);
+            if (relPath && !isForbiddenPathFn(relPath)) {
+              const contents = toolInput.content ?? toolInput.file_text ?? "";
+              console.log(`[runner] PostToolUse Write mirror: ${relPath}`);
+              scheduleMirrorFn(relPath, contents);
             }
           },
         ],
@@ -644,17 +735,18 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (filePath && !isForbiddenPathFn(filePath)) {
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd);
+            if (relPath && !isForbiddenPathFn(relPath)) {
               // After an Edit the file was modified — read it back for mirroring.
               try {
                 const { readFileSync } = await import("node:fs");
-                const contents = readFileSync(`${appCwd}/${filePath}`, "utf8");
-                console.log(`[runner] PostToolUse Edit mirror: ${filePath}`);
-                scheduleMirrorFn(filePath, contents);
+                const contents = readFileSync(`${appCwd}/${relPath}`, "utf8");
+                console.log(`[runner] PostToolUse Edit mirror: ${relPath}`);
+                scheduleMirrorFn(relPath, contents);
               } catch {
                 // Best-effort; mirror will be stale but not fatal.
-                console.warn(`[runner] PostToolUse Edit readback failed: ${filePath}`);
+                console.warn(`[runner] PostToolUse Edit readback failed: ${relPath}`);
               }
             }
           },
@@ -694,26 +786,54 @@ async function run() {
       isForbiddenPathFn: isForbiddenPath,
     });
 
+    // System prompt: { type:'preset', preset:'claude_code', append: <stable prefix + style> }
+    // (sdk.d.ts line 1126: systemPrompt?: string | { type:'preset'; preset:'claude_code'; append? })
+    // The stable prefix carries the import allowlist, hard constraints, and design system rules.
+    const systemPromptOption = buildSystemPromptOption(kit ?? "classic", styleDirective ?? "");
+    console.log("[runner] systemPrompt kit=" + (kit ?? "classic") + " appendLen=" + systemPromptOption.append.length);
+
+    // Shared query options — reused for the main query and every tsc repair cycle.
+    const queryOptions = {
+      model: model || "claude-opus-4-8",
+      permissionMode: "dontAsk",
+      allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      maxTurns: 40,
+      cwd: APP_CWD,
+      hooks,
+      systemPrompt: systemPromptOption,
+    };
+
+    // Accumulate cost from the SDK result messages across all query() calls.
+    // SDKResultMessage (type:'result') carries total_cost_usd and usage (BetaUsage).
+    // BetaUsage fields: input_tokens, output_tokens, cache_read_input_tokens,
+    //   cache_creation_input_tokens (sdk.d.ts NonNullableUsage via BetaUsage).
+    let totalCostUsd = 0;
+    const totalUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
+    function accumulateResult(message) {
+      if (message.type !== "result") return;
+      totalCostUsd += message.total_cost_usd ?? 0;
+      const u = message.usage ?? {};
+      totalUsage.inputTokens       += u.input_tokens ?? 0;
+      totalUsage.outputTokens      += u.output_tokens ?? 0;
+      totalUsage.cacheReadTokens   += u.cache_read_input_tokens ?? 0;
+      totalUsage.cacheWriteTokens  += u.cache_creation_input_tokens ?? 0;
+    }
+
     // Launch the query. The SDK returns an AsyncGenerator; we iterate it to
     // consume assistant messages and tool events, streaming text deltas to
     // Convex via appendChatDelta.
     console.log("[runner] launching query");
     const q = query({
       prompt: promptText,
-      options: {
-        model: model || "claude-opus-4-8",
-        permissionMode: "dontAsk",
-        allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-        maxTurns: 40,
-        cwd: APP_CWD,
-        hooks,
-      },
+      options: queryOptions,
     });
 
     let msgCount = 0;
     for await (const message of q) {
       msgCount++;
       console.log(`[runner] msg[${msgCount}] type=${message.type}`);
+      accumulateResult(message);
       // Stream assistant text deltas to Convex.
       if (message.type === "assistant" && message.message?.content) {
         for (const block of message.message.content) {
@@ -723,7 +843,7 @@ async function run() {
         }
       }
     }
-    console.log(`[runner] query complete, ${msgCount} messages`);
+    console.log(`[runner] query complete, ${msgCount} messages, costUsd=${totalCostUsd}`);
 
     await flushDelta();
     await flushMirror();
@@ -740,17 +860,11 @@ async function run() {
 
       const fixQ = query({
         prompt: buildTscFollowUpTurn(output),
-        options: {
-          model: model || "claude-opus-4-8",
-          permissionMode: "dontAsk",
-          allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-          maxTurns: 10,
-          cwd: APP_CWD,
-          hooks,
-        },
+        options: { ...queryOptions, maxTurns: 10 },
       });
 
       for await (const message of fixQ) {
+        accumulateResult(message);
         if (message.type === "assistant" && message.message?.content) {
           for (const block of message.message.content) {
             if (block.type === "text" && block.text) {
@@ -774,11 +888,11 @@ async function run() {
         ? `tsc still has errors after ${tscCycle} repair cycle(s)`
         : "Agent run complete — tsc clean",
       entryScreens: [],
-      costUsd: 0,
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      costUsd: totalCostUsd,
+      usage: totalUsage,
     };
 
-    console.log("[runner] bridge:complete ok=" + report.ok);
+    console.log("[runner] bridge:complete ok=" + report.ok + " costUsd=" + report.costUsd);
     await bridgeMutation("agentBridge:complete", { versionId, report });
   } catch (err) {
     console.error("[runner] fatal:", err);

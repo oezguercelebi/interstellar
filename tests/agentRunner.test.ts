@@ -397,8 +397,8 @@ test("FORBIDDEN_PATHS contains all expected infra entries", () => {
 // These tests exercise the pure helper logic that is inlined into run.mjs by the
 // template generator. They prove correct behaviour without any network or SDK.
 
-// buildTscFollowUpTurn + buildHooks — imported from the template generator module.
-import { buildTscFollowUpTurn, buildHooks } from "../scripts/lib/agentRunnerTemplate.mjs";
+// buildTscFollowUpTurn + buildHooks + normalizeMirrorPath — from template generator.
+import { buildTscFollowUpTurn, buildHooks, normalizeMirrorPath } from "../scripts/lib/agentRunnerTemplate.mjs";
 
 test("buildTscFollowUpTurn: includes the error block verbatim", () => {
   const turn = buildTscFollowUpTurn("app/index.tsx(1,1): error TS2345: foo");
@@ -419,12 +419,49 @@ test("buildTscFollowUpTurn: wraps errors in a code fence", () => {
   assert.ok(fenceLines.length >= 2, "expected at least an opening and closing ``` fence");
 });
 
+// ── normalizeMirrorPath ───────────────────────────────────────────────────────
+
+const APP_CWD = "/home/daytona/expo-app";
+
+test("normalizeMirrorPath: strips absolute cwd prefix → relative", () => {
+  assert.equal(normalizeMirrorPath(`${APP_CWD}/app/index.tsx`, APP_CWD), "app/index.tsx");
+});
+
+test("normalizeMirrorPath: already-relative path passes through unchanged", () => {
+  assert.equal(normalizeMirrorPath("app/index.tsx", APP_CWD), "app/index.tsx");
+});
+
+test("normalizeMirrorPath: strips leading ./", () => {
+  assert.equal(normalizeMirrorPath("./app/index.tsx", APP_CWD), "app/index.tsx");
+});
+
+test("normalizeMirrorPath: /tmp path is outside cwd → null", () => {
+  assert.equal(normalizeMirrorPath("/tmp/foo.txt", APP_CWD), null);
+});
+
+test("normalizeMirrorPath: exact cwd itself → null (not a file)", () => {
+  assert.equal(normalizeMirrorPath(APP_CWD, APP_CWD), null);
+});
+
+test("normalizeMirrorPath: empty string → null", () => {
+  assert.equal(normalizeMirrorPath("", APP_CWD), null);
+});
+
+test("normalizeMirrorPath: traversal path → null", () => {
+  assert.equal(normalizeMirrorPath("../sibling/file.ts", APP_CWD), null);
+  assert.equal(normalizeMirrorPath("..", APP_CWD), null);
+});
+
+test("normalizeMirrorPath: absolute path with different cwd → null", () => {
+  assert.equal(normalizeMirrorPath("/home/daytona/agent-runner/run.mjs", APP_CWD), null);
+});
+
 // ── buildHooks — SDK 0.3.173 shape (sdk.d.ts:1486, 814-819, 821) ─────────────
 
 function makeHooks() {
   const mirrored = new Map<string, string>();
   const hooks = buildHooks({
-    appCwd: "/fake/app",
+    appCwd: APP_CWD,
     scheduleMirrorFn: (p: string, c: string) => mirrored.set(p, c),
     isForbiddenPathFn: (p: string) => p === "package.json" || p === "tsconfig.json",
   });
@@ -474,13 +511,41 @@ test("buildHooks: PreToolUse Write hook returns undefined for allowed path", asy
   assert.equal(result, undefined, "allowed path must return undefined");
 });
 
-test("buildHooks: PostToolUse Write hook schedules mirror for allowed file", async () => {
+test("buildHooks: PreToolUse Write hook denies forbidden absolute path (normalizes first)", async () => {
+  const { hooks } = makeHooks();
+  const writeMatcher = hooks.PreToolUse.find((m) => m.matcher === "Write")!;
+  const result = await writeMatcher.hooks[0](
+    { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { path: `${APP_CWD}/package.json` }, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.equal(result?.hookSpecificOutput?.permissionDecision, "deny", "absolute forbidden path must deny");
+});
+
+test("buildHooks: PreToolUse Write hook allows absolute path inside cwd", async () => {
+  const { hooks } = makeHooks();
+  const writeMatcher = hooks.PreToolUse.find((m) => m.matcher === "Write")!;
+  const result = await writeMatcher.hooks[0](
+    { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { path: `${APP_CWD}/app/index.tsx` }, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.equal(result, undefined, "absolute allowed path must return undefined");
+});
+
+test("buildHooks: PostToolUse Write hook mirrors absolute path as relative", async () => {
   const { hooks, mirrored } = makeHooks();
   const writeMatcher = hooks.PostToolUse.find((m) => m.matcher === "Write")!;
   await writeMatcher.hooks[0](
-    { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: "app/foo.tsx", content: "hello" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+    { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: `${APP_CWD}/app/foo.tsx`, content: "hello" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
   );
-  assert.equal(mirrored.get("app/foo.tsx"), "hello");
+  assert.equal(mirrored.get("app/foo.tsx"), "hello", "absolute path must be stored as relative");
+  assert.ok(!mirrored.has(`${APP_CWD}/app/foo.tsx`), "absolute key must not be stored");
+});
+
+test("buildHooks: PostToolUse Write hook schedules mirror for allowed relative file", async () => {
+  const { hooks, mirrored } = makeHooks();
+  const writeMatcher = hooks.PostToolUse.find((m) => m.matcher === "Write")!;
+  await writeMatcher.hooks[0](
+    { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: "app/bar.tsx", content: "world" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.equal(mirrored.get("app/bar.tsx"), "world");
 });
 
 test("buildHooks: PostToolUse Write hook does NOT mirror forbidden path", async () => {
@@ -490,6 +555,15 @@ test("buildHooks: PostToolUse Write hook does NOT mirror forbidden path", async 
     { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: "package.json", content: "{}" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
   );
   assert.ok(!mirrored.has("package.json"), "forbidden path must not be mirrored");
+});
+
+test("buildHooks: PostToolUse Write hook does NOT mirror /tmp paths (outside cwd)", async () => {
+  const { hooks, mirrored } = makeHooks();
+  const writeMatcher = hooks.PostToolUse.find((m) => m.matcher === "Write")!;
+  await writeMatcher.hooks[0](
+    { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: "/tmp/leak.txt", content: "x" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.ok(!mirrored.has("/tmp/leak.txt") && !mirrored.has("leak.txt"), "/tmp path must not be mirrored");
 });
 
 // ── mirror batching logic ────────────────────────────────────────────────────
@@ -700,6 +774,44 @@ test("run.mjs uses agentBridge: prefixed function paths", () => {
   assert.match(src, /agentBridge:heartbeat/);
   assert.match(src, /agentBridge:mirrorFile/);
   assert.match(src, /agentBridge:complete/);
+});
+
+test("run.mjs uses normalizeMirrorPath before scheduling mirrors", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  assert.match(src, /normalizeMirrorPath/);
+  // Hooks must use relPath not rawPath for scheduling
+  assert.match(src, /scheduleMirrorFn\(relPath/);
+  assert.ok(!src.includes("scheduleMirrorFn(filePath"), "must not use old filePath variable name");
+});
+
+test("run.mjs passes systemPrompt preset to query() (sdk.d.ts:1126)", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  assert.match(src, /systemPrompt/);
+  assert.match(src, /type.*preset/);
+  assert.match(src, /preset.*claude_code/);
+  // Must include the inlined stable prefix for at least one kit
+  assert.match(src, /Import allowlist|HARD CONSTRAINTS/);
+  assert.ok(!src.includes("costUsd: 0,"), "costUsd must not be hardcoded to 0");
+});
+
+test("run.mjs captures SDKResultMessage total_cost_usd and usage for real cost telemetry", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  assert.match(src, /total_cost_usd/);
+  assert.match(src, /input_tokens/);
+  assert.match(src, /output_tokens/);
+  assert.match(src, /cache_read_input_tokens/);
+  assert.match(src, /cache_creation_input_tokens/);
+  // Must accumulate across queries
+  assert.match(src, /accumulateResult/);
 });
 
 // ── Sweeper predicate — legacy rows must not be swept ────────────────────────

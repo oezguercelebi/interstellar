@@ -151,6 +151,41 @@ function inlineModule(relPath) {
 }
 
 /**
+ * Normalize a file path delivered by a tool hook (PreToolUse/PostToolUse) to a
+ * project-relative path suitable for mirroring and forbidden-path checks.
+ *
+ * Rules:
+ *   1. If the path starts with appCwd + "/" — strip that prefix → relative path.
+ *   2. If the path starts with "/" but NOT with appCwd — it is outside the cwd
+ *      (e.g. /tmp/..., /etc/...) → return null (skip).
+ *   3. If the path is already relative — strip a leading "./" if present.
+ *   4. An empty string → null.
+ *   5. Never returns a path starting with "../" (outside the cwd) → null.
+ *
+ * Exported for pure unit tests.
+ */
+export function normalizeMirrorPath(rawPath, appCwd) {
+  if (!rawPath) return null;
+  let p = rawPath;
+  // Case 1: absolute path inside cwd
+  const prefix = appCwd.endsWith("/") ? appCwd : appCwd + "/";
+  if (p.startsWith(prefix)) {
+    p = p.slice(prefix.length);
+  } else if (p === appCwd) {
+    // Exactly the cwd itself — not a file
+    return null;
+  } else if (p.startsWith("/")) {
+    // Absolute path outside cwd
+    return null;
+  }
+  // Case 3: strip leading ./
+  if (p.startsWith("./")) p = p.slice(2);
+  // Guard: no traversal outside cwd
+  if (!p || p.startsWith("../") || p === "..") return null;
+  return p;
+}
+
+/**
  * Build the SDK-correct hooks config for the agent query.
  * Exported so tests/agentRunner.test.ts can exercise it without needing run.mjs.
  *
@@ -170,13 +205,14 @@ export function buildHooks({ appCwd, scheduleMirrorFn, isForbiddenPathFn }) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (isForbiddenPathFn(filePath)) {
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd) ?? rawPath;
+            if (isForbiddenPathFn(relPath)) {
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
                   permissionDecision: "deny",
-                  permissionDecisionReason: `Refusing to write forbidden path: ${filePath}`,
+                  permissionDecisionReason: `Refusing to write forbidden path: ${relPath}`,
                 },
               };
             }
@@ -188,13 +224,14 @@ export function buildHooks({ appCwd, scheduleMirrorFn, isForbiddenPathFn }) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (isForbiddenPathFn(filePath)) {
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd) ?? rawPath;
+            if (isForbiddenPathFn(relPath)) {
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
                   permissionDecision: "deny",
-                  permissionDecisionReason: `Refusing to edit forbidden path: ${filePath}`,
+                  permissionDecisionReason: `Refusing to edit forbidden path: ${relPath}`,
                 },
               };
             }
@@ -208,10 +245,11 @@ export function buildHooks({ appCwd, scheduleMirrorFn, isForbiddenPathFn }) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            const contents = toolInput.content ?? toolInput.file_text ?? "";
-            if (filePath && !isForbiddenPathFn(filePath)) {
-              scheduleMirrorFn(filePath, contents);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd);
+            if (relPath && !isForbiddenPathFn(relPath)) {
+              const contents = toolInput.content ?? toolInput.file_text ?? "";
+              scheduleMirrorFn(relPath, contents);
             }
           },
         ],
@@ -221,12 +259,13 @@ export function buildHooks({ appCwd, scheduleMirrorFn, isForbiddenPathFn }) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (filePath && !isForbiddenPathFn(filePath)) {
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd);
+            if (relPath && !isForbiddenPathFn(relPath)) {
               try {
                 const { readFileSync } = await import("node:fs");
-                const contents = readFileSync(`${appCwd}/${filePath}`, "utf8");
-                scheduleMirrorFn(filePath, contents);
+                const contents = readFileSync(`${appCwd}/${relPath}`, "utf8");
+                scheduleMirrorFn(relPath, contents);
               } catch {
                 // Best-effort.
               }
@@ -255,6 +294,37 @@ export function buildTscFollowUpTurn(errorBlock) {
 }
 
 /**
+ * Extract a named template-literal export from a TS source string.
+ * Handles: export const NAME = `...`; (backtick string, possibly multi-line)
+ * Returns the raw text between the backticks (with escapes intact).
+ * Throws if the export is not found, so drift is caught at generation time.
+ */
+function extractTemplateLiteral(src, exportName) {
+  // Match: export const NAME = `...`; where content may span lines.
+  // We search for the opening backtick after the assignment and scan to the
+  // matching closing backtick (handling escaped backticks \`).
+  const assignRe = new RegExp(`export const ${exportName}\\s*=\\s*\``);
+  const match = assignRe.exec(src);
+  if (!match) throw new Error(`extractTemplateLiteral: "${exportName}" not found`);
+  let i = match.index + match[0].length;
+  let result = "";
+  while (i < src.length) {
+    if (src[i] === "\\") {
+      // Escaped character — include both chars
+      result += src[i] + (src[i + 1] ?? "");
+      i += 2;
+    } else if (src[i] === "`") {
+      // Closing backtick
+      return result;
+    } else {
+      result += src[i];
+      i++;
+    }
+  }
+  throw new Error(`extractTemplateLiteral: "${exportName}" has no closing backtick`);
+}
+
+/**
  * Generate the full run.mjs content.
  * @param {string} root - Absolute path to the repo root
  * @returns {string} The generated file content
@@ -265,6 +335,25 @@ export function generate(root) {
   const decisionSrc = inlineModule("convex/lib/agentRunner/decision.ts");
   const reportSrc = inlineModule("convex/lib/agentRunner/report.ts");
   const tokenSrc = inlineModule("convex/lib/agentRunner/token.ts");
+
+  // Read the prompt-cache-anchor source files and extract the stable system prefix
+  // text verbatim. These strings are inlined into run.mjs so the agent gets the same
+  // constraints as the legacy path. The source files are never imported (Rule 4 / convex
+  // entry files); we read them as text and extract their template literals.
+  // IMPORTANT: extracting here at generation time means the mirror test will catch any
+  // drift — whenever prompt.ts or designSystem.ts changes, run.mjs must be regenerated.
+  const promptSrc = fs.readFileSync(path.join(root, "convex/agents/prompt.ts"), "utf8");
+  const designSrc = fs.readFileSync(path.join(root, "convex/agents/designSystem.ts"), "utf8");
+  const SYSTEM_PROMPT_TEXT = extractTemplateLiteral(promptSrc, "SYSTEM_PROMPT");
+  const SYSTEM_PROMPT_NATIVEWIND_TEXT = extractTemplateLiteral(promptSrc, "SYSTEM_PROMPT_NATIVEWIND");
+  const HOUSE_DESIGN_SYSTEM_TEXT = extractTemplateLiteral(designSrc, "HOUSE_DESIGN_SYSTEM");
+  const HOUSE_DESIGN_SYSTEM_NATIVEWIND_TEXT = extractTemplateLiteral(designSrc, "HOUSE_DESIGN_SYSTEM_NATIVEWIND");
+
+  // Build the two stable prefixes (classic and nativewind) as JSON-serialised strings
+  // so they can be embedded as JS string literals in run.mjs without escaping hell.
+  // JSON.stringify produces a valid JS string literal (double-quoted, all special chars escaped).
+  const STABLE_CLASSIC_JSON = JSON.stringify(`${SYSTEM_PROMPT_TEXT}\n\n${HOUSE_DESIGN_SYSTEM_TEXT}`);
+  const STABLE_NATIVEWIND_JSON = JSON.stringify(`${SYSTEM_PROMPT_NATIVEWIND_TEXT}\n\n${HOUSE_DESIGN_SYSTEM_NATIVEWIND_TEXT}`);
 
   return `#!/usr/bin/env node
 /**
@@ -340,6 +429,61 @@ function buildTscFollowUpTurn(errorBlock) {
   ].join("\\n");
 }
 
+// ── System prompt (kit-selected stable prefix, inlined from convex/agents/) ───
+// These constants are extracted from prompt.ts + designSystem.ts at generation
+// time so the runner enforces the same import allowlist, hard constraints, and
+// design-system rules as the legacy Convex codegen path.
+// classic kit:
+const STABLE_SYSTEM_CLASSIC = ${STABLE_CLASSIC_JSON};
+// nativewind kit:
+const STABLE_SYSTEM_NATIVEWIND = ${STABLE_NATIVEWIND_JSON};
+
+/**
+ * Select the stable system prefix for the given kit.
+ * Returns the combined SYSTEM_PROMPT + HOUSE_DESIGN_SYSTEM text.
+ */
+function selectStableSystem(kitName) {
+  return kitName === "nativewind" ? STABLE_SYSTEM_NATIVEWIND : STABLE_SYSTEM_CLASSIC;
+}
+
+/**
+ * Build the system prompt option for query() — SDK 0.2.73+/0.3.173 shape:
+ *   { type: 'preset', preset: 'claude_code', append?: string }
+ * The stable prefix is appended after the preset so the import allowlist and
+ * hard constraints are always in effect. styleDirective is appended last if set.
+ */
+function buildSystemPromptOption(kitName, styleDirectiveText) {
+  const stableText = selectStableSystem(kitName);
+  const appendParts = [stableText];
+  if (styleDirectiveText) {
+    appendParts.push(\`# STYLE DIRECTIVE (apply on every screen)\\n\${styleDirectiveText}\`);
+  }
+  return {
+    type: "preset",
+    preset: "claude_code",
+    append: appendParts.join("\\n\\n"),
+  };
+}
+
+// ── Mirror path normalization ─────────────────────────────────────────────────
+// Normalizes absolute or relative paths from tool hooks to project-relative
+// paths for mirroring. Returns null for paths outside the cwd (skip those).
+function normalizeMirrorPath(rawPath, appCwd) {
+  if (!rawPath) return null;
+  let p = rawPath;
+  const prefix = appCwd.endsWith("/") ? appCwd : appCwd + "/";
+  if (p.startsWith(prefix)) {
+    p = p.slice(prefix.length);
+  } else if (p === appCwd) {
+    return null;
+  } else if (p.startsWith("/")) {
+    return null; // absolute path outside cwd — skip
+  }
+  if (p.startsWith("./")) p = p.slice(2);
+  if (!p || p.startsWith("../") || p === "..") return null;
+  return p;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SELF-TEST (--self-test flag — no network, no SDK)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -392,10 +536,20 @@ async function runSelfTests() {
   assert(turn.includes("error TS2345: foo"), "buildTscFollowUpTurn: includes error");
   assert(turn.includes("TypeScript errors"), "buildTscFollowUpTurn: includes preamble");
 
+  // normalizeMirrorPath
+  assert(normalizeMirrorPath("/home/daytona/expo-app/app/index.tsx", "/home/daytona/expo-app") === "app/index.tsx", "normalize: strips absolute cwd prefix");
+  assert(normalizeMirrorPath("app/index.tsx", "/home/daytona/expo-app") === "app/index.tsx", "normalize: already-relative passthrough");
+  assert(normalizeMirrorPath("./app/index.tsx", "/home/daytona/expo-app") === "app/index.tsx", "normalize: strips leading ./");
+  assert(normalizeMirrorPath("/tmp/foo.txt", "/home/daytona/expo-app") === null, "normalize: /tmp is outside cwd → null");
+  assert(normalizeMirrorPath("/home/daytona/expo-app", "/home/daytona/expo-app") === null, "normalize: exact cwd → null");
+  assert(normalizeMirrorPath("", "/home/daytona/expo-app") === null, "normalize: empty → null");
+  assert(normalizeMirrorPath("../sibling/file.ts", "/home/daytona/expo-app") === null, "normalize: traversal → null");
+
   // hooks shape (SDK 0.3.173 verified)
   const mirrored = new Map();
+  const CWD = "/home/daytona/expo-app";
   const hooks = buildHooks({
-    appCwd: "/fake",
+    appCwd: CWD,
     scheduleMirrorFn: (p, c) => mirrored.set(p, c),
     isForbiddenPathFn: isForbiddenPath,
   });
@@ -409,23 +563,45 @@ async function runSelfTests() {
     assert(!m.handler, "HookCallbackMatcher must NOT have .handler (old wrong shape)");
     assert(!m.match, "HookCallbackMatcher must NOT have .match (old wrong shape)");
   }
-  // PreToolUse deny for forbidden path must return hookSpecificOutput with permissionDecision:'deny'
+  // PreToolUse deny for forbidden path (relative)
   const writeMatchers = hooks.PreToolUse.filter((m) => m.matcher === "Write");
   assert(writeMatchers.length === 1, "PreToolUse has Write matcher");
   const denyResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "package.json" } });
-  assert(denyResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path returns deny");
+  assert(denyResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path (relative) returns deny");
   assert(denyResult?.hookSpecificOutput?.hookEventName === "PreToolUse", "deny hookEventName is PreToolUse");
-  // PreToolUse allow for allowed path must return undefined
+  // PreToolUse deny for forbidden path (absolute)
+  const denyAbsResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: CWD + "/package.json" } });
+  assert(denyAbsResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path (absolute) returns deny");
+  // PreToolUse allow for allowed path (absolute)
+  const allowAbsResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: CWD + "/app/index.tsx" } });
+  assert(allowAbsResult === undefined, "allowed absolute path returns undefined from PreToolUse hook");
+  // PreToolUse allow for allowed path (relative)
   const allowResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/index.tsx" } });
-  assert(allowResult === undefined, "allowed path returns undefined from PreToolUse hook");
-  // PostToolUse Write schedules mirror
+  assert(allowResult === undefined, "allowed relative path returns undefined from PreToolUse hook");
+  // PostToolUse Write schedules mirror — absolute path → normalized relative
   const postWriteMatchers = hooks.PostToolUse.filter((m) => m.matcher === "Write");
   assert(postWriteMatchers.length === 1, "PostToolUse has Write matcher");
-  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/foo.tsx", content: "hello" } });
-  assert(mirrored.get("app/foo.tsx") === "hello", "PostToolUse Write schedules mirror");
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: CWD + "/app/foo.tsx", content: "hello" } });
+  assert(mirrored.get("app/foo.tsx") === "hello", "PostToolUse Write (absolute path) mirrors as relative");
+  // PostToolUse Write — relative path
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/bar.tsx", content: "world" } });
+  assert(mirrored.get("app/bar.tsx") === "world", "PostToolUse Write (relative path) mirrors as relative");
   // PostToolUse Write does NOT mirror forbidden paths
   await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "package.json", content: "{}" } });
   assert(!mirrored.has("package.json"), "PostToolUse Write does NOT mirror forbidden path");
+  // PostToolUse Write does NOT mirror paths outside cwd
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "/tmp/secret.txt", content: "x" } });
+  assert(!mirrored.has("/tmp/secret.txt"), "PostToolUse Write does NOT mirror /tmp paths");
+
+  // system prompt option
+  const sysOpt = buildSystemPromptOption("classic", "");
+  assert(sysOpt.type === "preset", "systemPromptOption: type=preset");
+  assert(sysOpt.preset === "claude_code", "systemPromptOption: preset=claude_code");
+  assert(typeof sysOpt.append === "string" && sysOpt.append.length > 100, "systemPromptOption: append has stable prefix");
+  assert(sysOpt.append.includes("Import allowlist") || sysOpt.append.includes("HARD CONSTRAINTS"), "systemPromptOption: append contains constraints");
+  const sysOptNw = buildSystemPromptOption("nativewind", "dark mode");
+  assert(sysOptNw.append.includes("dark mode"), "systemPromptOption nativewind: append includes styleDirective");
+  assert(sysOptNw.append.includes("NativeWind") || sysOptNw.append.includes("className"), "systemPromptOption nativewind: uses NW prefix");
 
   console.log(\`Self-test: \${passed} passed, \${failed} failed\`);
   if (failed > 0) process.exit(1);
@@ -606,6 +782,7 @@ const MAX_TSC_CYCLES = 4;
  *   HookCallbackMatcher: { matcher?: string; hooks: HookCallback[]; timeout?: number }
  *   HookCallback: (input, toolUseID, { signal }) => Promise<HookJSONOutput>
  *   Deny via SyncHookJSONOutput.hookSpecificOutput.permissionDecision = 'deny'
+ *   Paths are normalized via normalizeMirrorPath before forbidden check and mirror.
  *
  * Exported for pure unit tests — no SDK import required to test the logic.
  */
@@ -621,14 +798,15 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (isForbiddenPathFn(filePath)) {
-              console.log(\`[runner] PreToolUse Write blocked forbidden: \${filePath}\`);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd) ?? rawPath;
+            if (isForbiddenPathFn(relPath)) {
+              console.log(\`[runner] PreToolUse Write blocked forbidden: \${relPath}\`);
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
                   permissionDecision: "deny",
-                  permissionDecisionReason: \`Refusing to write forbidden path: \${filePath}\`,
+                  permissionDecisionReason: \`Refusing to write forbidden path: \${relPath}\`,
                 },
               };
             }
@@ -640,14 +818,15 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (isForbiddenPathFn(filePath)) {
-              console.log(\`[runner] PreToolUse Edit blocked forbidden: \${filePath}\`);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd) ?? rawPath;
+            if (isForbiddenPathFn(relPath)) {
+              console.log(\`[runner] PreToolUse Edit blocked forbidden: \${relPath}\`);
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
                   permissionDecision: "deny",
-                  permissionDecisionReason: \`Refusing to edit forbidden path: \${filePath}\`,
+                  permissionDecisionReason: \`Refusing to edit forbidden path: \${relPath}\`,
                 },
               };
             }
@@ -662,11 +841,12 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            const contents = toolInput.content ?? toolInput.file_text ?? "";
-            if (filePath && !isForbiddenPathFn(filePath)) {
-              console.log(\`[runner] PostToolUse Write mirror: \${filePath}\`);
-              scheduleMirrorFn(filePath, contents);
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd);
+            if (relPath && !isForbiddenPathFn(relPath)) {
+              const contents = toolInput.content ?? toolInput.file_text ?? "";
+              console.log(\`[runner] PostToolUse Write mirror: \${relPath}\`);
+              scheduleMirrorFn(relPath, contents);
             }
           },
         ],
@@ -676,17 +856,18 @@ export function buildHooks(opts) {
         hooks: [
           async (input) => {
             const toolInput = input.tool_input ?? {};
-            const filePath = toolInput.path ?? toolInput.file_path ?? "";
-            if (filePath && !isForbiddenPathFn(filePath)) {
+            const rawPath = toolInput.path ?? toolInput.file_path ?? "";
+            const relPath = normalizeMirrorPath(rawPath, appCwd);
+            if (relPath && !isForbiddenPathFn(relPath)) {
               // After an Edit the file was modified — read it back for mirroring.
               try {
                 const { readFileSync } = await import("node:fs");
-                const contents = readFileSync(\`\${appCwd}/\${filePath}\`, "utf8");
-                console.log(\`[runner] PostToolUse Edit mirror: \${filePath}\`);
-                scheduleMirrorFn(filePath, contents);
+                const contents = readFileSync(\`\${appCwd}/\${relPath}\`, "utf8");
+                console.log(\`[runner] PostToolUse Edit mirror: \${relPath}\`);
+                scheduleMirrorFn(relPath, contents);
               } catch {
                 // Best-effort; mirror will be stale but not fatal.
-                console.warn(\`[runner] PostToolUse Edit readback failed: \${filePath}\`);
+                console.warn(\`[runner] PostToolUse Edit readback failed: \${relPath}\`);
               }
             }
           },
@@ -726,26 +907,54 @@ async function run() {
       isForbiddenPathFn: isForbiddenPath,
     });
 
+    // System prompt: { type:'preset', preset:'claude_code', append: <stable prefix + style> }
+    // (sdk.d.ts line 1126: systemPrompt?: string | { type:'preset'; preset:'claude_code'; append? })
+    // The stable prefix carries the import allowlist, hard constraints, and design system rules.
+    const systemPromptOption = buildSystemPromptOption(kit ?? "classic", styleDirective ?? "");
+    console.log("[runner] systemPrompt kit=" + (kit ?? "classic") + " appendLen=" + systemPromptOption.append.length);
+
+    // Shared query options — reused for the main query and every tsc repair cycle.
+    const queryOptions = {
+      model: model || "claude-opus-4-8",
+      permissionMode: "dontAsk",
+      allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      maxTurns: 40,
+      cwd: APP_CWD,
+      hooks,
+      systemPrompt: systemPromptOption,
+    };
+
+    // Accumulate cost from the SDK result messages across all query() calls.
+    // SDKResultMessage (type:'result') carries total_cost_usd and usage (BetaUsage).
+    // BetaUsage fields: input_tokens, output_tokens, cache_read_input_tokens,
+    //   cache_creation_input_tokens (sdk.d.ts NonNullableUsage via BetaUsage).
+    let totalCostUsd = 0;
+    const totalUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
+    function accumulateResult(message) {
+      if (message.type !== "result") return;
+      totalCostUsd += message.total_cost_usd ?? 0;
+      const u = message.usage ?? {};
+      totalUsage.inputTokens       += u.input_tokens ?? 0;
+      totalUsage.outputTokens      += u.output_tokens ?? 0;
+      totalUsage.cacheReadTokens   += u.cache_read_input_tokens ?? 0;
+      totalUsage.cacheWriteTokens  += u.cache_creation_input_tokens ?? 0;
+    }
+
     // Launch the query. The SDK returns an AsyncGenerator; we iterate it to
     // consume assistant messages and tool events, streaming text deltas to
     // Convex via appendChatDelta.
     console.log("[runner] launching query");
     const q = query({
       prompt: promptText,
-      options: {
-        model: model || "claude-opus-4-8",
-        permissionMode: "dontAsk",
-        allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-        maxTurns: 40,
-        cwd: APP_CWD,
-        hooks,
-      },
+      options: queryOptions,
     });
 
     let msgCount = 0;
     for await (const message of q) {
       msgCount++;
       console.log(\`[runner] msg[\${msgCount}] type=\${message.type}\`);
+      accumulateResult(message);
       // Stream assistant text deltas to Convex.
       if (message.type === "assistant" && message.message?.content) {
         for (const block of message.message.content) {
@@ -755,7 +964,7 @@ async function run() {
         }
       }
     }
-    console.log(\`[runner] query complete, \${msgCount} messages\`);
+    console.log(\`[runner] query complete, \${msgCount} messages, costUsd=\${totalCostUsd}\`);
 
     await flushDelta();
     await flushMirror();
@@ -772,17 +981,11 @@ async function run() {
 
       const fixQ = query({
         prompt: buildTscFollowUpTurn(output),
-        options: {
-          model: model || "claude-opus-4-8",
-          permissionMode: "dontAsk",
-          allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-          maxTurns: 10,
-          cwd: APP_CWD,
-          hooks,
-        },
+        options: { ...queryOptions, maxTurns: 10 },
       });
 
       for await (const message of fixQ) {
+        accumulateResult(message);
         if (message.type === "assistant" && message.message?.content) {
           for (const block of message.message.content) {
             if (block.type === "text" && block.text) {
@@ -806,11 +1009,11 @@ async function run() {
         ? \`tsc still has errors after \${tscCycle} repair cycle(s)\`
         : "Agent run complete — tsc clean",
       entryScreens: [],
-      costUsd: 0,
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      costUsd: totalCostUsd,
+      usage: totalUsage,
     };
 
-    console.log("[runner] bridge:complete ok=" + report.ok);
+    console.log("[runner] bridge:complete ok=" + report.ok + " costUsd=" + report.costUsd);
     await bridgeMutation("agentBridge:complete", { versionId, report });
   } catch (err) {
     console.error("[runner] fatal:", err);
