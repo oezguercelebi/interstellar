@@ -216,16 +216,16 @@ export const reopenPreview = mutation({
       previewAt: undefined,
       error: undefined,
     });
-    // G5: only free the prior sandbox if the version has no live agent job.
-    // An agent-runner version owns its sandbox — provisionPreview must not
-    // eagerly delete it before the runner has a chance to report back.
-    const previousSandboxId = version.agentJobId ? undefined : version.sandboxId;
+    // Pass the existing sandboxId as previousSandboxId so provisionPreview
+    // can run the tiered-reopen logic (probe → restart → fresh provision).
+    // The node action itself decides whether to delete/restart/skip based on
+    // the probe result and sandbox state. G5 (agentJobId guard) is enforced
+    // inside provisionPreview — no eager delete here.
     await ctx.scheduler.runAfter(0, internal.preview.provisionPreview, {
       versionId,
       kit: version.kit, // stamped at creation; absent (pre-migration) = classic
-      // Captured before re-provision: provisionPreview deletes it so the old and
-      // new sandboxes don't both count against the disk quota during the reopen.
-      previousSandboxId,
+      previousSandboxId: version.sandboxId,
+      previousPreviewUrl: version.previewUrl,
     });
   },
 });

@@ -341,6 +341,7 @@ test("C3: the pure test closure stays _generated-free and .ts-extensioned", () =
     "convex/lib/agentRunner/report.ts",
     "convex/lib/agentRunner/token.ts",
     "convex/lib/palette.ts",
+    "convex/lib/sandbox/reopenTier.ts",
     "convex/lib/sandbox/typecheckRepair.ts",
     "convex/lib/styles.ts",
     "convex/lib/validate.ts",

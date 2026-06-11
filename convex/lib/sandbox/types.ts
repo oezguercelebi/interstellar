@@ -105,4 +105,23 @@ export interface SandboxProvider {
    * is a no-op, not an error.
    */
   delete?(sandboxId: string): Promise<void>;
+
+  /**
+   * Return the current lifecycle state of an existing sandbox.
+   * Used by the tiered-reopen path to decide whether to restart Metro (tier 2)
+   * or provision fresh (tier 3). Optional — providers without it cause the
+   * tiered path to fall through to tier 3.
+   *
+   * "running"  — sandbox process is up (Metro may or may not be serving)
+   * "stopped"  — sandbox is auto-stopped/paused but still exists on-disk
+   * "unknown"  — can't determine (sandbox gone, API error, etc.)
+   */
+  getSandboxState?(sandboxId: string): Promise<"running" | "stopped" | "unknown">;
+
+  /**
+   * Start a stopped/paused sandbox without uploading files or launching Metro.
+   * Used in the tier-2 reopen path: after a cold-start the Metro process is gone,
+   * so `restartDevServer` is called right after to launch it fresh. Optional.
+   */
+  startSandbox?(sandboxId: string): Promise<void>;
 }

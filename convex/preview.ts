@@ -8,6 +8,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { repairFiles } from "./lib/webcompat";
 import { getSandboxProvider } from "./lib/sandbox";
 import { SANDBOX_APP_ROOT } from "./lib/sandbox/types";
+import { decideReopenTier } from "./lib/sandbox/reopenTier";
 import {
   parseTscOutput,
   selectImplicatedFiles,
@@ -34,12 +35,17 @@ export const provisionPreview = internalAction({
     // — so no extra versions query is needed here.
     kit: v.optional(v.union(v.literal("classic"), v.literal("nativewind"))),
     // Sandbox id of THIS version's prior provision, passed by reopenPreview so we
-    // can free its quota before booting the replacement (Daytona's idle auto-stop
-    // is ~30 min — long enough that stacked reopens exhaust the disk limit).
+    // can run the tiered-reopen logic (probe → restart → fresh provision).
+    // Also used by tier 3 to free the prior sandbox before booting a replacement.
     // Absent on first-gen/edit: those versions have no prior sandbox.
     previousSandboxId: v.optional(v.string()),
+    // The stored previewUrl at the time of the reopen request. The mutation clears
+    // previewUrl before scheduling this action, so we pass it explicitly for the
+    // tier-1 probe (which needs the URL to check if the sandbox is still alive).
+    // Absent on first-gen/edit.
+    previousPreviewUrl: v.optional(v.string()),
   },
-  handler: async (ctx, { versionId, kit, previousSandboxId }) => {
+  handler: async (ctx, { versionId, kit, previousSandboxId, previousPreviewUrl }) => {
     const provider = getSandboxProvider();
 
     // Short-circuit if no sandbox credentials.
@@ -59,21 +65,43 @@ export const provisionPreview = internalAction({
     // G5: only free the prior sandbox if the version has no live agent job.
     const safeToDelete = !version?.agentJobId;
 
-    // Free this version's previous sandbox BEFORE provisioning its replacement,
-    // so the two don't both count against the disk/CPU quota. Best-effort: a
-    // failed teardown must never block the new preview — the orphan still
-    // auto-stops on its own. reopenPreview has already cleared the stale URL, so
-    // there's nothing live to protect here.
-    if (previousSandboxId && provider.delete && safeToDelete) {
-      try {
-        await provider.delete(previousSandboxId);
-        console.log(`provisionPreview: freed prior sandbox ${previousSandboxId}`);
-      } catch (err) {
-        console.warn(
-          `provisionPreview: could not free prior sandbox ${previousSandboxId} (non-fatal):`,
-          String(err).slice(0, 200),
-        );
+    // ── TIERED REOPEN ──────────────────────────────────────────────────────────
+    // When previousSandboxId is set this is a reopen of an existing version.
+    // Try the cheapest path before falling through to a full fresh provision.
+    //
+    //   Tier 1 — probe: the preview URL is still alive → re-stamp only (<4s).
+    //   Tier 2 — restart: sandbox exists → start (if stopped) + relaunch Metro.
+    //   Tier 3 — fresh: sandbox gone → delete best-effort + full provision (below).
+    //
+    // G5: when version has a live agentJobId the agent owns the sandbox — we never
+    // delete or restart it. decideReopenTier returns tier 1 (probe-only) in that case;
+    // if probe=dead we return early and let the agent manage lifecycle itself.
+    if (previousSandboxId && previousPreviewUrl) {
+      const tiered = await tryTieredReopen(
+        ctx,
+        provider,
+        previousSandboxId,
+        previousPreviewUrl,
+        version?.agentJobId ? true : false,
+        versionId,
+      );
+      if (tiered === "done") return; // tier 1 or tier 2 succeeded — no fresh provision needed
+      // tiered === "fallthrough": proceed to tier 3 full provision below
+      // Best-effort free the prior sandbox before booting the replacement.
+      if (safeToDelete && provider.delete) {
+        try {
+          await provider.delete(previousSandboxId);
+          console.log(`provisionPreview: tier 3 — freed prior sandbox ${previousSandboxId}`);
+        } catch (err) {
+          console.warn(
+            `provisionPreview: could not free prior sandbox ${previousSandboxId} (non-fatal):`,
+            String(err).slice(0, 200),
+          );
+        }
       }
+    } else if (!previousSandboxId) {
+      // First-gen / edit path — no prior sandbox to free.
+      // (Legacy: the old code only freed when previousSandboxId was set — preserve.)
     }
 
     // Fetch the generated files for this version.
@@ -145,6 +173,142 @@ export const provisionPreview = internalAction({
     }
   },
 });
+
+/**
+ * Tiered reopen — try tiers 1 → 2 → 3 in order.
+ *
+ * Returns:
+ *   "done"        — tier 1 or tier 2 succeeded; provisionPreview should return early.
+ *   "fallthrough" — both tiers failed; caller should proceed to tier 3 (full provision).
+ *
+ * G5: hasAgentJob=true short-circuits to tier 1 probe only. If probe=dead the
+ * agent manages lifecycle — we return "done" (early exit) to avoid interfering.
+ */
+async function tryTieredReopen(
+  ctx: ActionCtx,
+  provider: ReturnType<typeof getSandboxProvider>,
+  sandboxId: string,
+  previewUrl: string,
+  hasAgentJob: boolean,
+  versionId: Id<"versions">,
+): Promise<"done" | "fallthrough"> {
+  if (!provider) return "fallthrough";
+
+  // Tier 1: probe the preview URL with a short timeout (~4s).
+  const probeAlive = await probePreviewUrl(previewUrl);
+  console.log(`[tiered-reopen] tier-1 probe → ${probeAlive ? "alive" : "dead"}`);
+
+  // Get sandbox state (tier 2 decision input).
+  let sandboxState: "running" | "stopped" | "unknown" = "unknown";
+  if (!probeAlive && !hasAgentJob && provider.getSandboxState) {
+    try {
+      sandboxState = await provider.getSandboxState(sandboxId);
+      console.log(`[tiered-reopen] sandbox state → ${sandboxState}`);
+    } catch (err) {
+      console.warn("[tiered-reopen] getSandboxState failed (non-fatal):", String(err).slice(0, 200));
+    }
+  }
+
+  const tier = decideReopenTier({
+    probeOutcome: probeAlive ? "alive" : "dead",
+    sandboxState,
+    hasAgentJob,
+  });
+  console.log(`[tiered-reopen] decided tier ${tier} (agentJob=${hasAgentJob})`);
+
+  // Tier 1: preview is alive — restore previewUrl, re-stamp previewAt and return.
+  if (tier === 1 && probeAlive) {
+    await ctx.runMutation(internal.versions.patch, {
+      versionId,
+      previewUrl,
+      previewAt: Date.now(),
+      sandboxProvider: "daytona",
+      sandboxId,
+      error: undefined,
+    });
+    console.log(`[tiered-reopen] tier 1 success — re-stamped previewAt, sandbox ${sandboxId}`);
+    return "done";
+  }
+
+  // Tier 1 (G5 path): probe=dead but agent owns sandbox — don't touch, return early.
+  if (tier === 1 && hasAgentJob) {
+    console.log(`[tiered-reopen] tier 1 G5 early-exit — agent owns sandbox ${sandboxId}, probe=dead, not interfering`);
+    return "done";
+  }
+
+  // Tier 2: sandbox exists — start (if stopped) then relaunch Metro, wait for ready.
+  if (tier === 2) {
+    try {
+      // Start the sandbox if it's stopped (cold-box: Metro process is gone).
+      if (sandboxState === "stopped" && provider.startSandbox) {
+        console.log(`[tiered-reopen] tier 2 — starting stopped sandbox ${sandboxId}`);
+        await provider.startSandbox(sandboxId);
+      }
+
+      // (Re)launch Metro — restartDevServer kills any lingering process and boots fresh.
+      if (provider.restartDevServer) {
+        console.log(`[tiered-reopen] tier 2 — relaunching dev server in sandbox ${sandboxId}`);
+        await provider.restartDevServer(sandboxId, SANDBOX_APP_ROOT);
+      } else if (provider.exec) {
+        // Fallback: exec the Metro launch command directly.
+        const METRO_LAUNCH_CMD = `(CI=1 EXPO_NO_TELEMETRY=1 nohup ./node_modules/.bin/expo start --web --port 8081 < /dev/null > /tmp/expo.log 2>&1 &) ; sleep 5 ; echo metro-launched`;
+        await provider.exec(sandboxId, `pkill -f 'expo start' || true ; ${METRO_LAUNCH_CMD}`, {
+          cwd: SANDBOX_APP_ROOT,
+          timeoutSeconds: 60,
+        });
+      } else {
+        console.warn("[tiered-reopen] tier 2 — provider lacks restartDevServer + exec; falling through to tier 3");
+        return "fallthrough";
+      }
+
+      // Wait for ready with a shorter budget (~60s) — files are already in place.
+      const ready = await waitForReady(previewUrl, 15, 4_000);
+      if (ready) {
+        await ctx.runMutation(internal.versions.patch, {
+          versionId,
+          previewUrl,
+          previewAt: Date.now(),
+          sandboxProvider: "daytona",
+          sandboxId,
+          error: undefined,
+        });
+        console.log(`[tiered-reopen] tier 2 success — dev server ready, sandbox ${sandboxId}`);
+        return "done";
+      }
+      console.warn(`[tiered-reopen] tier 2 failed — dev server didn't come up in 60s; falling through to tier 3`);
+    } catch (err) {
+      console.warn("[tiered-reopen] tier 2 threw (non-fatal, falling to tier 3):", String(err).slice(0, 300));
+    }
+  }
+
+  return "fallthrough";
+}
+
+/**
+ * Single-shot probe of a preview URL with a short timeout (~4s).
+ * Used by the tier-1 reopen check: if the URL responds with HTTP 200 the
+ * sandbox is still live and we can skip all sandbox churn.
+ * Sends the X-Daytona-Skip-Preview-Warning header so Daytona's interstitial
+ * page doesn't masquerade as a live app response.
+ */
+async function probePreviewUrl(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4_000);
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "X-Daytona-Skip-Preview-Warning": "true" },
+        signal: controller.signal,
+      });
+      return res.ok;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Poll the preview URL until it returns HTTP 200 or we exhaust retries.

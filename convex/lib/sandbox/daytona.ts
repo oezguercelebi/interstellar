@@ -333,6 +333,47 @@ export class DaytonaProvider implements SandboxProvider {
       throw new Error(`Sandbox delete failed for ${sandboxId}: ${res.status} ${await res.text()}`);
     }
   }
+
+  /**
+   * Query the lifecycle state of an existing Daytona sandbox via the REST API.
+   * Returns "running", "stopped", or "unknown" (on 404 / API error / unexpected state).
+   */
+  async getSandboxState(sandboxId: string): Promise<"running" | "stopped" | "unknown"> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) return "unknown";
+    const apiBase = process.env.DAYTONA_API_URL ?? "https://app.daytona.io/api";
+    try {
+      const res = await fetch(`${apiBase}/sandbox/${sandboxId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (res.status === 404) return "unknown"; // sandbox gone
+      if (!res.ok) return "unknown";
+      const data = await res.json() as { state?: string };
+      const s = (data.state ?? "").toLowerCase();
+      if (s === "started" || s === "running") return "running";
+      if (s === "stopped" || s === "stopping" || s === "paused") return "stopped";
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  /**
+   * Start a stopped Daytona sandbox via the REST API.
+   * After a cold-box start the Metro process is gone — call restartDevServer next.
+   */
+  async startSandbox(sandboxId: string): Promise<void> {
+    const apiKey = process.env.DAYTONA_API_KEY;
+    if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
+    const apiBase = process.env.DAYTONA_API_URL ?? "https://app.daytona.io/api";
+    const res = await fetch(`${apiBase}/sandbox/${sandboxId}/start`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) {
+      throw new Error(`Sandbox start failed for ${sandboxId}: ${res.status} ${await res.text()}`);
+    }
+  }
 }
 
 /** Detached Metro launch (shared by provision + restartDevServer). */
