@@ -28,6 +28,9 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { MODEL_SONNET } from "../styles.ts";
 import type { AppFile } from "./types";
+import { FORBIDDEN_PATHS } from "../agentRunner/forbidden.ts";
+// Re-export so existing imports of FORBIDDEN_PATHS from this module keep working.
+export { FORBIDDEN_PATHS };
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -36,30 +39,6 @@ export const MAX_ERROR_LINES = 50;
 
 /** Maximum number of implicated files fed to the model. */
 export const MAX_IMPLICATED_FILES = 8;
-
-/**
- * Files the repair loop must never touch, regardless of tsc errors.
- * These are generated-once infra files whose changes would break the sandbox.
- */
-export const FORBIDDEN_PATHS = new Set([
-  "package.json",
-  "package-lock.json",
-  "app.json",
-  "tsconfig.json",
-  "tsconfig.base.json",
-  "babel.config.js",
-  "babel.config.ts",
-  "metro.config.js",
-  "metro.config.ts",
-  "expo.config.js",
-  "expo.config.ts",
-  // NativeWind snapshot infra — baked once, never repaired.
-  "tailwind.config.js",
-  "tailwind.config.ts",
-  "global.css",
-  "nativewind-env.d.ts",
-  "postcss.config.js",
-]);
 
 // ── tsc output parsing ────────────────────────────────────────────────────────
 

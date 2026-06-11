@@ -50,7 +50,7 @@ const STALE_MS = 28 * 60 * 1000;
 export function isPreviewStale(version: PreviewVersion, now = Date.now()): boolean {
   return (
     version.sandboxProvider === "daytona" &&
-    (!version.previewAt || now - version.previewAt > STALE_MS)
+    (!version.previewAt || now - version.previewAt >= STALE_MS)
   );
 }
 

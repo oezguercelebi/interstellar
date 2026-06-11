@@ -107,7 +107,7 @@ const ENTRY_FILES = [
 // deliberately added/removed (same commit as the change).
 // ---------------------------------------------------------------------------
 test("scanner self-check: minimum file counts per scanned directory", () => {
-  assert.ok(convexFiles.length >= 22, `convex/ scan found ${convexFiles.length} files, expected >= 22`);
+  assert.ok(convexFiles.length >= 27, `convex/ scan found ${convexFiles.length} files, expected >= 27`);
   assert.ok(appFiles.length >= 5, `app/ scan found ${appFiles.length} files, expected >= 5`);
   assert.ok(componentFiles.length >= 22, `components/ scan found ${componentFiles.length} files, expected >= 22`);
   assert.ok(libFiles.length >= 5, `lib/ scan found ${libFiles.length} files, expected >= 5`);
@@ -324,6 +324,11 @@ test("C3: the pure test closure stays _generated-free and .ts-extensioned", () =
     "convex/agents/prompt.ts",
     "convex/agents/starterKit.ts",
     "convex/agents/starterKitNativewind.ts",
+    "convex/lib/agentRunner/decision.ts",
+    "convex/lib/agentRunner/forbidden.ts",
+    "convex/lib/agentRunner/overlay.ts",
+    "convex/lib/agentRunner/report.ts",
+    "convex/lib/agentRunner/token.ts",
     "convex/lib/palette.ts",
     "convex/lib/sandbox/typecheckRepair.ts",
     "convex/lib/styles.ts",
