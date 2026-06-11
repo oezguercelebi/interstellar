@@ -169,13 +169,31 @@ const RUN_MJS_CONTENTS = fs.readFileSync(
   "utf8",
 );
 
+// Docker rejects Dockerfile lines >65535 bytes; run.mjs base64 exceeds that.
+// Chunk the base64 into appended pieces, then decode once at the end.
+function b64WriteCommandsChunked(filePath, contents, chunkSize = 40_000) {
+  const b64 = Buffer.from(contents, "utf8").toString("base64");
+  const tmp = `/tmp/${filePath.replaceAll("/", "_")}.b64`;
+  const cmds = [`rm -f ${tmp}`];
+  for (let i = 0; i < b64.length; i += chunkSize) {
+    cmds.push(`echo '${b64.slice(i, i + chunkSize)}' >> ${tmp}`);
+  }
+  cmds.push(
+    `node -e "const fs=require('fs');fs.writeFileSync('${filePath}', Buffer.from(fs.readFileSync('${tmp}','utf8').replace(/\\n/g,''),'base64'))" && rm -f ${tmp}`,
+  );
+  return cmds;
+}
+
 const NW2_EXTRA_STEPS = [
   // 1. Create agent-runner sibling dir — NEVER inside expo-app.
   "mkdir -p /home/daytona/agent-runner",
   // Write package.json (base64 to avoid quoting issues with JSON).
   `${RUNNER} && ${b64WriteCommand("package.json", AGENT_RUNNER_PACKAGE_JSON)}`,
-  // Write run.mjs (read from repo at bake-script execution time).
-  `${RUNNER} && ${b64WriteCommand("run.mjs", RUN_MJS_CONTENTS)}`,
+  // Write run.mjs (read from repo at bake-script execution time; chunked —
+  // a single-line base64 write tripped Docker's 64KB Dockerfile-line limit).
+  ...b64WriteCommandsChunked("run.mjs", RUN_MJS_CONTENTS).map(
+    (c) => `${RUNNER} && ${c}`,
+  ),
   // Install the SDK — exact-pinned, offline-available after this point.
   `${RUNNER} && npm install`,
   // Record the installed SDK version in the bake log.
