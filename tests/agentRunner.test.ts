@@ -397,8 +397,8 @@ test("FORBIDDEN_PATHS contains all expected infra entries", () => {
 // These tests exercise the pure helper logic that is inlined into run.mjs by the
 // template generator. They prove correct behaviour without any network or SDK.
 
-// buildTscFollowUpTurn — imported from the template generator module.
-import { buildTscFollowUpTurn } from "../scripts/lib/agentRunnerTemplate.mjs";
+// buildTscFollowUpTurn + buildHooks — imported from the template generator module.
+import { buildTscFollowUpTurn, buildHooks } from "../scripts/lib/agentRunnerTemplate.mjs";
 
 test("buildTscFollowUpTurn: includes the error block verbatim", () => {
   const turn = buildTscFollowUpTurn("app/index.tsx(1,1): error TS2345: foo");
@@ -417,6 +417,79 @@ test("buildTscFollowUpTurn: wraps errors in a code fence", () => {
   const lines = turn.split("\n");
   const fenceLines = lines.filter((l) => l.trim() === "```");
   assert.ok(fenceLines.length >= 2, "expected at least an opening and closing ``` fence");
+});
+
+// ── buildHooks — SDK 0.3.173 shape (sdk.d.ts:1486, 814-819, 821) ─────────────
+
+function makeHooks() {
+  const mirrored = new Map<string, string>();
+  const hooks = buildHooks({
+    appCwd: "/fake/app",
+    scheduleMirrorFn: (p: string, c: string) => mirrored.set(p, c),
+    isForbiddenPathFn: (p: string) => p === "package.json" || p === "tsconfig.json",
+  });
+  return { hooks, mirrored };
+}
+
+test("buildHooks: returns PascalCase HookEvent keys (sdk.d.ts:821)", () => {
+  const { hooks } = makeHooks();
+  assert.ok(Array.isArray(hooks.PreToolUse), "PreToolUse must be an array");
+  assert.ok(Array.isArray(hooks.PostToolUse), "PostToolUse must be an array");
+  // Old wrong camelCase keys must be absent
+  assert.ok(!(hooks as Record<string, unknown>)["preToolUse"], "preToolUse (camelCase) must not exist");
+  assert.ok(!(hooks as Record<string, unknown>)["postToolUse"], "postToolUse (camelCase) must not exist");
+});
+
+test("buildHooks: each matcher has .hooks array, no .handler or .match (sdk.d.ts:814-819)", () => {
+  const { hooks } = makeHooks();
+  for (const m of [...hooks.PreToolUse, ...hooks.PostToolUse]) {
+    assert.ok(Array.isArray(m.hooks), "HookCallbackMatcher.hooks must be an array");
+    assert.ok(!(m as Record<string, unknown>)["handler"], ".handler must not exist on matcher");
+    assert.ok(!(m as Record<string, unknown>)["match"], ".match must not exist on matcher");
+  }
+});
+
+test("buildHooks: PreToolUse Write matcher has matcher='Write'", () => {
+  const { hooks } = makeHooks();
+  const writeMatchers = hooks.PreToolUse.filter((m) => m.matcher === "Write");
+  assert.equal(writeMatchers.length, 1, "one Write matcher in PreToolUse");
+});
+
+test("buildHooks: PreToolUse Write hook denies forbidden path with hookSpecificOutput (sdk.d.ts:6218,2212)", async () => {
+  const { hooks } = makeHooks();
+  const writeMatcher = hooks.PreToolUse.find((m) => m.matcher === "Write")!;
+  const result = await writeMatcher.hooks[0](
+    { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { path: "package.json" }, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.equal(result?.hookSpecificOutput?.permissionDecision, "deny");
+  assert.equal(result?.hookSpecificOutput?.hookEventName, "PreToolUse");
+});
+
+test("buildHooks: PreToolUse Write hook returns undefined for allowed path", async () => {
+  const { hooks } = makeHooks();
+  const writeMatcher = hooks.PreToolUse.find((m) => m.matcher === "Write")!;
+  const result = await writeMatcher.hooks[0](
+    { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { path: "app/index.tsx" }, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.equal(result, undefined, "allowed path must return undefined");
+});
+
+test("buildHooks: PostToolUse Write hook schedules mirror for allowed file", async () => {
+  const { hooks, mirrored } = makeHooks();
+  const writeMatcher = hooks.PostToolUse.find((m) => m.matcher === "Write")!;
+  await writeMatcher.hooks[0](
+    { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: "app/foo.tsx", content: "hello" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.equal(mirrored.get("app/foo.tsx"), "hello");
+});
+
+test("buildHooks: PostToolUse Write hook does NOT mirror forbidden path", async () => {
+  const { hooks, mirrored } = makeHooks();
+  const writeMatcher = hooks.PostToolUse.find((m) => m.matcher === "Write")!;
+  await writeMatcher.hooks[0](
+    { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { path: "package.json", content: "{}" }, tool_response: {}, tool_use_id: "x", session_id: "s", transcript_path: "/t", cwd: "/c" } as any,
+  );
+  assert.ok(!mirrored.has("package.json"), "forbidden path must not be mirrored");
 });
 
 // ── mirror batching logic ────────────────────────────────────────────────────
@@ -551,27 +624,51 @@ test("run.mjs allowedTools uses SDK tool names (not Messages-API type strings)",
   assert.ok(!src.includes("bash_20250124"), "must not use Messages-API tool type string");
 });
 
-test("run.mjs hooks use preToolUse/postToolUse with match+handler shape (SDK docs)", () => {
+// SDK 0.3.173 hook shape (sdk.d.ts line 1486, 814-819, 821, 2203-2215):
+//   hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>
+//   HookEvent keys are PascalCase: 'PreToolUse', 'PostToolUse'
+//   HookCallbackMatcher: { matcher?: string; hooks: HookCallback[] }
+//   HookCallback: (input, toolUseID, { signal }) => Promise<HookJSONOutput>
+//   Input fields: snake_case tool_name, tool_input (object)
+//   Deny: SyncHookJSONOutput.hookSpecificOutput.permissionDecision = 'deny'
+test("run.mjs hooks use PascalCase HookEvent keys (SDK 0.3.173 sdk.d.ts:821)", () => {
   const src = fs.readFileSync(
     path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
     "utf8",
   );
-  assert.match(src, /preToolUse/);
-  assert.match(src, /postToolUse/);
-  assert.match(src, /match:/);
-  assert.match(src, /handler:/);
-  assert.match(src, /toolName/);
+  // PascalCase event names required by HookEvent type
+  assert.match(src, /PreToolUse/);
+  assert.match(src, /PostToolUse/);
+  // HookCallbackMatcher shape: { matcher?, hooks: [] } — NOT { match, handler }
+  assert.match(src, /matcher:/);
+  assert.match(src, /hooks:\s*\[/);
+  assert.ok(!src.match(/\bmatch\s*:\s*\{\s*toolName/), "must not use old .match.toolName shape");
+  assert.ok(!src.match(/\bhandler\s*:/), "must not use old .handler shape");
 });
 
-test("run.mjs Write hook uses hook.input.path and hook.input.content (SDK field names)", () => {
+test("run.mjs Write hook reads snake_case tool_input.path from HookInput (SDK 0.3.173 sdk.d.ts:2205-2206)", () => {
   const src = fs.readFileSync(
     path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
     "utf8",
   );
-  assert.match(src, /hook\.input\.path/);
-  assert.match(src, /hook\.input\.content/);
-  // Must not reference Messages-API field names
+  // tool_input is the input object (snake_case per PreToolUseHookInput)
+  assert.match(src, /tool_input/);
+  // Must not reference old made-up hook.input.path shape
+  assert.ok(!src.includes("hook.input.path"), "must not use old hook.input.path shape");
   assert.ok(!src.includes("new_str"), "must not use Messages-API field new_str");
+});
+
+test("run.mjs PreToolUse deny uses hookSpecificOutput.permissionDecision (SDK 0.3.173 sdk.d.ts:6218, 2212)", () => {
+  const src = fs.readFileSync(
+    path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
+    "utf8",
+  );
+  assert.match(src, /hookSpecificOutput/);
+  assert.match(src, /permissionDecision.*deny/);
+  assert.match(src, /hookEventName.*PreToolUse/);
+  // Must not use old made-up shape
+  assert.ok(!src.includes('"behavior"'), 'must not use old { behavior: "deny" } shape');
+  assert.ok(!src.match(/behavior\s*:\s*["']deny/), 'must not use old behavior:deny shape');
 });
 
 test("run.mjs tsc verify runs locally (execSync), not via bridge", () => {

@@ -151,6 +151,94 @@ function inlineModule(relPath) {
 }
 
 /**
+ * Build the SDK-correct hooks config for the agent query.
+ * Exported so tests/agentRunner.test.ts can exercise it without needing run.mjs.
+ *
+ * SDK 0.3.173 shape (sdk.d.ts lines 814-819, 821, 1486, 2203-2215, 6205-6219):
+ *   hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>
+ *   HookCallbackMatcher: { matcher?: string; hooks: HookCallback[]; timeout?: number }
+ *   HookCallback: (input, toolUseID, { signal }) => Promise<HookJSONOutput>
+ *   HookInput fields are snake_case: tool_name, tool_input (object), tool_use_id
+ *   Deny via SyncHookJSONOutput: { hookSpecificOutput: { hookEventName:'PreToolUse',
+ *                                   permissionDecision:'deny', permissionDecisionReason } }
+ */
+export function buildHooks({ appCwd, scheduleMirrorFn, isForbiddenPathFn }) {
+  return {
+    PreToolUse: [
+      {
+        matcher: "Write",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            if (isForbiddenPathFn(filePath)) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason: `Refusing to write forbidden path: ${filePath}`,
+                },
+              };
+            }
+          },
+        ],
+      },
+      {
+        matcher: "Edit",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            if (isForbiddenPathFn(filePath)) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason: `Refusing to edit forbidden path: ${filePath}`,
+                },
+              };
+            }
+          },
+        ],
+      },
+    ],
+    PostToolUse: [
+      {
+        matcher: "Write",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            const contents = toolInput.content ?? toolInput.file_text ?? "";
+            if (filePath && !isForbiddenPathFn(filePath)) {
+              scheduleMirrorFn(filePath, contents);
+            }
+          },
+        ],
+      },
+      {
+        matcher: "Edit",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            if (filePath && !isForbiddenPathFn(filePath)) {
+              try {
+                const { readFileSync } = await import("node:fs");
+                const contents = readFileSync(`${appCwd}/${filePath}`, "utf8");
+                scheduleMirrorFn(filePath, contents);
+              } catch {
+                // Best-effort.
+              }
+            }
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
  * Pure helper: build the tsc error follow-up user turn message.
  * Exported so tests/agentRunner.test.ts can exercise it.
  */
@@ -203,14 +291,18 @@ export function generate(root) {
  *   POST {CONVEX_URL}/api/mutation  { path: "agentBridge:X", args: { jobToken, ...} }
  *   JOB_TOKEN is an HMAC arg on every call — no custom request headers.
  *
- * Agent SDK API (documented at code.claude.com/docs/en/agent-sdk/typescript):
- *   query({ prompt, options }) → AsyncGenerator<SDKMessage>
- *   options.permissionMode = "dontAsk"  (camelCase)
- *   options.allowedTools   = ["Read","Write","Edit","Bash","Glob","Grep"]
- *   options.hooks.preToolUse  — array of { match, handler } objects
- *   options.hooks.postToolUse — array of { match, handler } objects
- *   Write hook input: { path, content }; Edit hook input: { path, edits[] }
- *   Multi-turn: query.streamInput(asyncIterable) feeds follow-up user messages
+ * Agent SDK 0.3.173 API (sdk.d.ts verified from box):
+ *   query({ prompt, options? }) → Query (AsyncIterable<SDKMessage>)
+ *   options.permissionMode: PermissionMode — 'dontAsk' (camelCase)
+ *   options.allowedTools: string[]
+ *   options.hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>
+ *     HookEvent = 'PreToolUse' | 'PostToolUse' | ... (PascalCase)
+ *     HookCallbackMatcher = { matcher?: string; hooks: HookCallback[]; timeout?: number }
+ *     HookCallback = (input: HookInput, toolUseID, { signal }) => Promise<HookJSONOutput>
+ *   Hook input fields are snake_case: tool_name, tool_input (object), tool_use_id
+ *   PreToolUse deny: { hookSpecificOutput: { hookEventName:'PreToolUse',
+ *                       permissionDecision:'deny', permissionDecisionReason:'...' } }
+ *   Multi-turn: new query() call per tsc repair cycle
  *
  * Flags:
  *   --self-test         — run pure-logic self-tests and exit 0 (no network)
@@ -252,7 +344,7 @@ function buildTscFollowUpTurn(errorBlock) {
 // SELF-TEST (--self-test flag — no network, no SDK)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function runSelfTests() {
+async function runSelfTests() {
   let passed = 0;
   let failed = 0;
 
@@ -300,6 +392,41 @@ function runSelfTests() {
   assert(turn.includes("error TS2345: foo"), "buildTscFollowUpTurn: includes error");
   assert(turn.includes("TypeScript errors"), "buildTscFollowUpTurn: includes preamble");
 
+  // hooks shape (SDK 0.3.173 verified)
+  const mirrored = new Map();
+  const hooks = buildHooks({
+    appCwd: "/fake",
+    scheduleMirrorFn: (p, c) => mirrored.set(p, c),
+    isForbiddenPathFn: isForbiddenPath,
+  });
+  assert(Array.isArray(hooks.PreToolUse), "hooks.PreToolUse is an array (PascalCase key)");
+  assert(Array.isArray(hooks.PostToolUse), "hooks.PostToolUse is an array (PascalCase key)");
+  assert(!hooks.preToolUse, "hooks must NOT have camelCase preToolUse key");
+  assert(!hooks.postToolUse, "hooks must NOT have camelCase postToolUse key");
+  // Each matcher must have 'hooks' array (not 'handler')
+  for (const m of [...hooks.PreToolUse, ...hooks.PostToolUse]) {
+    assert(Array.isArray(m.hooks), "HookCallbackMatcher must have .hooks array");
+    assert(!m.handler, "HookCallbackMatcher must NOT have .handler (old wrong shape)");
+    assert(!m.match, "HookCallbackMatcher must NOT have .match (old wrong shape)");
+  }
+  // PreToolUse deny for forbidden path must return hookSpecificOutput with permissionDecision:'deny'
+  const writeMatchers = hooks.PreToolUse.filter((m) => m.matcher === "Write");
+  assert(writeMatchers.length === 1, "PreToolUse has Write matcher");
+  const denyResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "package.json" } });
+  assert(denyResult?.hookSpecificOutput?.permissionDecision === "deny", "Write forbidden path returns deny");
+  assert(denyResult?.hookSpecificOutput?.hookEventName === "PreToolUse", "deny hookEventName is PreToolUse");
+  // PreToolUse allow for allowed path must return undefined
+  const allowResult = await writeMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/index.tsx" } });
+  assert(allowResult === undefined, "allowed path returns undefined from PreToolUse hook");
+  // PostToolUse Write schedules mirror
+  const postWriteMatchers = hooks.PostToolUse.filter((m) => m.matcher === "Write");
+  assert(postWriteMatchers.length === 1, "PostToolUse has Write matcher");
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "app/foo.tsx", content: "hello" } });
+  assert(mirrored.get("app/foo.tsx") === "hello", "PostToolUse Write schedules mirror");
+  // PostToolUse Write does NOT mirror forbidden paths
+  await postWriteMatchers[0].hooks[0]({ tool_name: "Write", tool_input: { path: "package.json", content: "{}" } });
+  assert(!mirrored.has("package.json"), "PostToolUse Write does NOT mirror forbidden path");
+
   console.log(\`Self-test: \${passed} passed, \${failed} failed\`);
   if (failed > 0) process.exit(1);
 }
@@ -309,7 +436,7 @@ function runSelfTests() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 if (process.argv.includes("--self-test")) {
-  runSelfTests();
+  await runSelfTests();
   process.exit(0);
 }
 
@@ -452,100 +579,157 @@ function runTscLocally(cwd) {
 }
 
 // ── Main runner ───────────────────────────────────────────────────────────────
-// Agent SDK API (code.claude.com/docs/en/agent-sdk/typescript):
-//   query({ prompt, options }) → AsyncGenerator<SDKMessage>
-//   options.permissionMode = "dontAsk"  (camelCase per docs)
-//   options.allowedTools   = ["Read","Write","Edit","Bash","Glob","Grep"]
-//   options.hooks.preToolUse  / postToolUse — { match: { toolName }, handler }
-//   Write hook input: { path, content }; Edit hook input: { path, edits[] }
-//   Multi-turn tsc feedback: q.streamInput(asyncIterable) on the active query
+// Agent SDK 0.3.173 API (verified from box's sdk.d.ts):
+//   query({ prompt, options? }) → Query (AsyncIterable<SDKMessage>)
+//   options.permissionMode: PermissionMode — 'dontAsk' (camelCase)
+//   options.allowedTools: string[]
+//   options.hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>
+//     HookEvent = 'PreToolUse' | 'PostToolUse' | ... (PascalCase)
+//     HookCallbackMatcher = { matcher?: string; hooks: HookCallback[]; timeout?: number }
+//     HookCallback = (input: HookInput, toolUseID, { signal }) => Promise<HookJSONOutput>
+//   HookInput fields (snake_case):
+//     PreToolUseHookInput:  { hook_event_name, tool_name, tool_input, tool_use_id, ... }
+//     PostToolUseHookInput: { hook_event_name, tool_name, tool_input, tool_response, ... }
+//   PreToolUse deny return (SyncHookJSONOutput):
+//     { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
+//                             permissionDecisionReason: '...' } }
+//   matcher?: string — matched against tool_name; omit to match all tools
 
 const APP_CWD = "/home/daytona/expo-app";
 const MAX_TSC_CYCLES = 4;
 
-// Build an AsyncIterable<SDKUserMessage> from a single string message.
-async function* singleUserMessage(text) {
-  yield { type: "user", message: { role: "user", content: text } };
+/**
+ * Build the SDK-correct hooks config for the agent query.
+ *
+ * SDK 0.3.173 shape (sdk.d.ts lines 814-819, 2203-2215, 6205-6219):
+ *   hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>
+ *   HookCallbackMatcher: { matcher?: string; hooks: HookCallback[]; timeout?: number }
+ *   HookCallback: (input, toolUseID, { signal }) => Promise<HookJSONOutput>
+ *   Deny via SyncHookJSONOutput.hookSpecificOutput.permissionDecision = 'deny'
+ *
+ * Exported for pure unit tests — no SDK import required to test the logic.
+ */
+export function buildHooks(opts) {
+  const { appCwd, scheduleMirrorFn, isForbiddenPathFn } = opts;
+
+  return {
+    // sdk.d.ts line 821: HookEvent 'PreToolUse' (PascalCase)
+    PreToolUse: [
+      {
+        // matcher matches tool_name. Match Write and Edit to block forbidden paths.
+        matcher: "Write",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            if (isForbiddenPathFn(filePath)) {
+              console.log(\`[runner] PreToolUse Write blocked forbidden: \${filePath}\`);
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason: \`Refusing to write forbidden path: \${filePath}\`,
+                },
+              };
+            }
+          },
+        ],
+      },
+      {
+        matcher: "Edit",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            if (isForbiddenPathFn(filePath)) {
+              console.log(\`[runner] PreToolUse Edit blocked forbidden: \${filePath}\`);
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason: \`Refusing to edit forbidden path: \${filePath}\`,
+                },
+              };
+            }
+          },
+        ],
+      },
+    ],
+    // sdk.d.ts line 821: HookEvent 'PostToolUse' (PascalCase)
+    PostToolUse: [
+      {
+        matcher: "Write",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            const contents = toolInput.content ?? toolInput.file_text ?? "";
+            if (filePath && !isForbiddenPathFn(filePath)) {
+              console.log(\`[runner] PostToolUse Write mirror: \${filePath}\`);
+              scheduleMirrorFn(filePath, contents);
+            }
+          },
+        ],
+      },
+      {
+        matcher: "Edit",
+        hooks: [
+          async (input) => {
+            const toolInput = input.tool_input ?? {};
+            const filePath = toolInput.path ?? toolInput.file_path ?? "";
+            if (filePath && !isForbiddenPathFn(filePath)) {
+              // After an Edit the file was modified — read it back for mirroring.
+              try {
+                const { readFileSync } = await import("node:fs");
+                const contents = readFileSync(\`\${appCwd}/\${filePath}\`, "utf8");
+                console.log(\`[runner] PostToolUse Edit mirror: \${filePath}\`);
+                scheduleMirrorFn(filePath, contents);
+              } catch {
+                // Best-effort; mirror will be stale but not fatal.
+                console.warn(\`[runner] PostToolUse Edit readback failed: \${filePath}\`);
+              }
+            }
+          },
+        ],
+      },
+    ],
+  };
 }
 
 async function run() {
+  console.log("[runner] starting, versionId=" + versionId);
   startHeartbeat();
 
   try {
     // Dynamic import — SDK is installed in the nw2 snapshot, not in this repo.
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
+    console.log("[runner] SDK imported");
 
     // The initial prompt arrives via env: promptMessageId identifies the
     // message in the Convex thread. The actual text is baked into that message;
     // the bridge fetches it and returns it as the prompt string.
+    console.log("[runner] bridge:getPromptText");
     const promptText = await bridgeMutation("agentBridge:getPromptText", {
       versionId,
       promptMessageId,
     });
+    console.log("[runner] prompt fetched, length=" + (promptText?.length ?? 0));
 
     let tscCycle = 0;
 
-    // Hooks wired to the SDK's documented tool names and input shapes.
-    // preToolUse: write-deny FORBIDDEN_PATHS (deny before the write happens).
-    // postToolUse: mirror Write/Edit to Convex via the 300ms batcher.
-    const hooks = {
-      preToolUse: [
-        {
-          match: { toolName: "Write" },
-          handler: async (hook) => {
-            if (isForbiddenPath(hook.input.path ?? "")) {
-              return {
-                behavior: "deny",
-                message: \`Refusing to write forbidden path: \${hook.input.path}\`,
-              };
-            }
-          },
-        },
-        {
-          match: { toolName: "Edit" },
-          handler: async (hook) => {
-            if (isForbiddenPath(hook.input.path ?? "")) {
-              return {
-                behavior: "deny",
-                message: \`Refusing to edit forbidden path: \${hook.input.path}\`,
-              };
-            }
-          },
-        },
-      ],
-      postToolUse: [
-        {
-          match: { toolName: "Write" },
-          handler: async (hook) => {
-            if (hook.input.path && !isForbiddenPath(hook.input.path)) {
-              scheduleMirror(hook.input.path, hook.input.content ?? "");
-            }
-          },
-        },
-        {
-          match: { toolName: "Edit" },
-          handler: async (hook) => {
-            // After an Edit the file has been modified; read it back for mirroring.
-            if (hook.input.path && !isForbiddenPath(hook.input.path)) {
-              try {
-                const { readFileSync } = await import("node:fs");
-                const contents = readFileSync(
-                  \`\${APP_CWD}/\${hook.input.path}\`,
-                  "utf8",
-                );
-                scheduleMirror(hook.input.path, contents);
-              } catch {
-                // Best-effort; mirror will be stale but not fatal.
-              }
-            }
-          },
-        },
-      ],
-    };
+    // Build the hooks config using the real SDK 0.3.173 shape.
+    // hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>
+    // (sdk.d.ts line 1486)
+    const hooks = buildHooks({
+      appCwd: APP_CWD,
+      scheduleMirrorFn: scheduleMirror,
+      isForbiddenPathFn: isForbiddenPath,
+    });
 
     // Launch the query. The SDK returns an AsyncGenerator; we iterate it to
     // consume assistant messages and tool events, streaming text deltas to
     // Convex via appendChatDelta.
+    console.log("[runner] launching query");
     const q = query({
       prompt: promptText,
       options: {
@@ -558,7 +742,10 @@ async function run() {
       },
     });
 
+    let msgCount = 0;
     for await (const message of q) {
+      msgCount++;
+      console.log(\`[runner] msg[\${msgCount}] type=\${message.type}\`);
       // Stream assistant text deltas to Convex.
       if (message.type === "assistant" && message.message?.content) {
         for (const block of message.message.content) {
@@ -568,14 +755,14 @@ async function run() {
         }
       }
     }
+    console.log(\`[runner] query complete, \${msgCount} messages\`);
 
     await flushDelta();
     await flushMirror();
 
-    // tsc verify loop — runs locally in the sandbox, feeds errors back via
-    // q.streamInput() as per the SDK's multi-turn documented mechanism.
-    // Each cycle is a new query() because the first query has already
-    // completed; we pass the tsc error as the follow-up prompt.
+    // tsc verify loop — runs locally in the sandbox, feeds errors back as a
+    // new query() per cycle (the previous query has completed; multi-turn via
+    // new query calls is the correct pattern).
     while (tscCycle < MAX_TSC_CYCLES) {
       const { hasErrors, output } = runTscLocally(APP_CWD);
       if (!hasErrors) break;
@@ -611,6 +798,7 @@ async function run() {
 
     // Final tsc check to determine ok/fail status.
     const { hasErrors: finalErrors } = runTscLocally(APP_CWD);
+    console.log(\`[runner] final tsc: hasErrors=\${finalErrors}\`);
 
     const report = {
       ok: !finalErrors,
@@ -622,6 +810,7 @@ async function run() {
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     };
 
+    console.log("[runner] bridge:complete ok=" + report.ok);
     await bridgeMutation("agentBridge:complete", { versionId, report });
   } catch (err) {
     console.error("[runner] fatal:", err);
