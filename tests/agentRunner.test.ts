@@ -604,3 +604,40 @@ test("run.mjs uses agentBridge: prefixed function paths", () => {
   assert.match(src, /agentBridge:mirrorFile/);
   assert.match(src, /agentBridge:complete/);
 });
+
+// ── Sweeper predicate — legacy rows must not be swept ────────────────────────
+// sweepStaleRuns guards with `v.runner !== "agent"` to avoid killing legacy
+// in-Convex runs (they have no heartbeat so agentHeartbeatAt ?? 0 is always
+// "stale"). These pure tests assert the predicate logic.
+
+/** Simulates the sweeper eligibility check from agentBridge.sweepStaleRuns. */
+function isSweeperCandidate(row: { runner?: string; agentHeartbeatAt?: number }, staleThreshold: number): boolean {
+  if (row.runner !== "agent") return false; // legacy guard
+  const heartbeatAt = row.agentHeartbeatAt ?? 0;
+  return heartbeatAt < staleThreshold;
+}
+
+test("sweeper: legacy row (no runner field) is never a candidate regardless of heartbeat age", () => {
+  const staleThreshold = Date.now() - 5 * 60 * 1000;
+  // Legacy row: no runner, no heartbeat — would be killed without the guard
+  assert.ok(!isSweeperCandidate({ runner: undefined, agentHeartbeatAt: undefined }, staleThreshold));
+  // Legacy row with explicit non-agent runner
+  assert.ok(!isSweeperCandidate({ runner: "convex", agentHeartbeatAt: undefined }, staleThreshold));
+});
+
+test("sweeper: agent row with stale heartbeat IS a candidate", () => {
+  const staleThreshold = Date.now() - 5 * 60 * 1000;
+  const staleHeartbeat = Date.now() - 10 * 60 * 1000; // 10 min ago
+  assert.ok(isSweeperCandidate({ runner: "agent", agentHeartbeatAt: staleHeartbeat }, staleThreshold));
+});
+
+test("sweeper: agent row with missing heartbeat IS a candidate (agentHeartbeatAt ?? 0)", () => {
+  const staleThreshold = Date.now() - 5 * 60 * 1000;
+  assert.ok(isSweeperCandidate({ runner: "agent", agentHeartbeatAt: undefined }, staleThreshold));
+});
+
+test("sweeper: agent row with fresh heartbeat is NOT a candidate", () => {
+  const staleThreshold = Date.now() - 5 * 60 * 1000;
+  const freshHeartbeat = Date.now() - 30 * 1000; // 30s ago
+  assert.ok(!isSweeperCandidate({ runner: "agent", agentHeartbeatAt: freshHeartbeat }, staleThreshold));
+});

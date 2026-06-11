@@ -47,12 +47,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const origin = sandboxOrigin(id);
   const base = `/api/preview/${id}`;
   const subPath = (path ?? []).join("/");
-  const target = `${origin}/${subPath}${req.nextUrl.search}`;
+
+  // previewAt is a proxy-internal cache-bust discriminator; strip it before
+  // forwarding upstream so Metro never sees an unknown query param.
   const previewAt = req.nextUrl.searchParams.get("previewAt");
-  const isBundle = /\.(bundle|js)(\?|$)/.test(subPath) || /[?&]platform=web/.test(req.nextUrl.search);
+  const upstreamSearch = (() => {
+    const params = new URLSearchParams(req.nextUrl.searchParams);
+    params.delete("previewAt");
+    const s = params.toString();
+    return s ? `?${s}` : "";
+  })();
+  // Upstream URL has previewAt removed; cache key incorporates it separately.
+  const target = `${origin}/${subPath}${upstreamSearch}`;
+  const isBundle = /\.(bundle|js)(\?|$)/.test(subPath) || /[?&]platform=web/.test(upstreamSearch);
 
   // Serve a cached rewritten bundle immediately (skips the 4 MB refetch + regex).
-  // Cache key includes previewAt so a re-provisioned sandbox busts the old bundle.
+  // Cache key = upstream target + pa=<previewAt> so in-box agent edits bust stale bundles.
   if (isBundle) {
     const cacheKey = buildJsCacheKey(target, previewAt);
     const hit = jsCache.get(cacheKey);
@@ -84,8 +94,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   const contentType = upstream.headers.get("content-type") ?? "";
 
   // HTML document: small — rewrite asset paths + inject the routing shim.
+  // Pass previewAt so the shim can append it to bundle URLs the browser fetches
+  // from inside the iframe (those requests never carry previewAt otherwise).
   if (contentType.includes("text/html")) {
-    const html = rewriteHtml(await upstream.text(), base);
+    const html = rewriteHtml(await upstream.text(), base, previewAt);
     return new Response(html, {
       status: upstream.status,
       headers: {
@@ -122,9 +134,18 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
 }
 
 /** Rewrite the document: re-point assets at the proxy + inject the routing shim. */
-function rewriteHtml(html: string, base: string): string {
+function rewriteHtml(html: string, base: string, previewAt: string | null): string {
   // src="/x" / href="/x" → proxy-prefixed (these are root-absolute, ignore <base>).
-  let out = html.replace(/\b(src|href)=("|')\/(?!\/)/gi, (_m, attr, q) => `${attr}=${q}${base}/`);
+  // (?!\/) guards against protocol-relative (//...) URLs, same as the original.
+  // Bundle script sources (e.g. src="/index.bundle?platform=web") also get
+  // previewAt appended so the proxy's jsCache key matches on the initial page load.
+  let out = html.replace(/\b(src|href)=("|')(\/(?!\/)[^"']*)(["'])/gi, (_m, attr, q, urlPath, qEnd) => {
+    const proxied = `${base}${urlPath}`;
+    const withPA = previewAt && /\.(bundle|js)(\?|$)/.test(urlPath)
+      ? proxied + (urlPath.includes("?") ? `&previewAt=${previewAt}` : `?previewAt=${previewAt}`)
+      : proxied;
+    return `${attr}=${q}${withPA}${qEnd}`;
+  });
   out = rewriteAssetPaths(out, base);
 
   // RN-web ScrollViews render with overflow:hidden + touch-action:none, so a
@@ -136,12 +157,23 @@ function rewriteHtml(html: string, base: string): string {
   const scrollFix = `<style id="stellar-scroll-fix">
   [class*="WebkitOverflowScrolling"]{overflow-y:auto !important;touch-action:pan-y !important;}
 </style>`;
+  // Bake previewAt into the shim so bundle fetches originating inside the iframe
+  // carry it as a query param — those requests never see the document's ?previewAt,
+  // so the proxy can't read it from req.nextUrl.searchParams for them. The shim
+  // appends &previewAt=<ts> (or ?previewAt=<ts> if no existing ?) to any URL it
+  // re-points so the server-side cache key matches on those requests too.
+  const PA = JSON.stringify(previewAt ?? "");
   const shim = `${scrollFix}<script>(function(){
   var P=${JSON.stringify(base)};
+  var PA=${PA};
   // expo-router reads location.pathname — reset the iframe to root so it matches "/".
   try{ if(location.pathname.indexOf(P)===0){ var rest=location.pathname.slice(P.length)||"/"; history.replaceState(null,"",rest+location.search+location.hash); } }catch(e){}
   // Re-point any runtime root-absolute request back through the proxy.
-  function fix(u){ try{ if(typeof u==="string" && u.charAt(0)==="/" && u.charAt(1)!=="/" && u.indexOf(P)!==0) return P+u; }catch(e){} return u; }
+  // Bundle requests (.bundle, ?platform=web) also get ?previewAt stamped so the
+  // server-side jsCache key matches even when the bundle URL has no previewAt.
+  function isBundle(u){ return /\.(bundle|js)(\?|$)/.test(u)||u.indexOf("platform=web")!==-1; }
+  function addPA(u){ if(!PA) return u; return u+(u.indexOf("?")!==-1?"&previewAt=":"?previewAt=")+PA; }
+  function fix(u){ try{ if(typeof u==="string" && u.charAt(0)==="/" && u.charAt(1)!=="/" && u.indexOf(P)!==0){ var r=P+u; return isBundle(u)?addPA(r):r; } }catch(e){} return u; }
   if(window.fetch){ var f=window.fetch; window.fetch=function(i,o){ return f.call(this, typeof i==="string"?fix(i):i, o); }; }
   var xo=XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open=function(m,u){ try{arguments[1]=fix(u);}catch(e){} return xo.apply(this,arguments); };
 }())</script>`;

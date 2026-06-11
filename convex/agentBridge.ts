@@ -318,6 +318,11 @@ export const sweepStaleRuns = internalMutation({
       .collect();
 
     for (const v of generating) {
+      // Only sweep agent-runner rows (runner === "agent"). Legacy in-Convex runs
+      // have no heartbeat (agentHeartbeatAt is always undefined) so treating
+      // `agentHeartbeatAt ?? 0` as stale would kill every legacy run >5min.
+      if (v.runner !== "agent") continue;
+
       const heartbeatAt = v.agentHeartbeatAt ?? 0;
       if (heartbeatAt < staleThreshold) {
         await ctx.db.patch(v._id, {
