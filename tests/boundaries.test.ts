@@ -87,8 +87,9 @@ const appFiles = walk("app");
 const componentFiles = walk("components");
 const libFiles = walk("lib");
 
-/** The 10 convex entry files (C1/C2 frozen paths — never move or rename). */
+/** The 11 convex entry files (C1/C2 frozen paths — never move or rename). */
 const ENTRY_FILES = [
+  "convex/agentBridge.ts",
   "convex/codegen.ts",
   "convex/codegenWorkflow.ts",
   "convex/convex.config.ts",
@@ -107,7 +108,7 @@ const ENTRY_FILES = [
 // deliberately added/removed (same commit as the change).
 // ---------------------------------------------------------------------------
 test("scanner self-check: minimum file counts per scanned directory", () => {
-  assert.ok(convexFiles.length >= 27, `convex/ scan found ${convexFiles.length} files, expected >= 27`);
+  assert.ok(convexFiles.length >= 28, `convex/ scan found ${convexFiles.length} files, expected >= 28`);
   assert.ok(appFiles.length >= 5, `app/ scan found ${appFiles.length} files, expected >= 5`);
   assert.ok(componentFiles.length >= 22, `components/ scan found ${componentFiles.length} files, expected >= 22`);
   assert.ok(libFiles.length >= 5, `lib/ scan found ${libFiles.length} files, expected >= 5`);
@@ -160,7 +161,17 @@ test("C1: _generated/api importers inside convex/ are entries + agents/codegen.t
 const REGISTERED_RE = /^export const (\w+) = (query|mutation|action|httpAction|internalQuery|internalMutation|internalAction)\(/gm;
 
 const REGISTERED_SURFACE: Record<string, string[]> = {
-  "convex/codegen.ts": ["runVariant"],
+  "convex/agentBridge.ts": [
+    "appendChatDelta",
+    "complete",
+    "fail",
+    "getPromptText",
+    "heartbeat",
+    "mirrorDelete",
+    "mirrorFile",
+    "sweepStaleRuns",
+  ],
+  "convex/codegen.ts": ["awaitVariant", "runVariant"],
   "convex/files.ts": ["listByVersion", "snapshot", "upsert", "remove", "seedStarter", "cloneInto"],
   "convex/preview.ts": ["provisionPreview"],
   "convex/projects.ts": [
@@ -177,7 +188,7 @@ const REGISTERED_SURFACE: Record<string, string[]> = {
   ],
   "convex/studio.ts": ["listMessages"],
   "convex/testHelpers.ts": ["seedFixture"],
-  "convex/versions.ts": ["patch"],
+  "convex/versions.ts": ["getById", "patch"],
 };
 
 test("C1/C5: registered-export surface is frozen per convex file", () => {

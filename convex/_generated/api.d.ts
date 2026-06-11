@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as agentBridge from "../agentBridge.js";
 import type * as agents_codegen from "../agents/codegen.js";
 import type * as agents_designSystem from "../agents/designSystem.js";
 import type * as agents_prompt from "../agents/prompt.js";
@@ -17,6 +18,11 @@ import type * as codegen from "../codegen.js";
 import type * as codegenWorkflow from "../codegenWorkflow.js";
 import type * as files from "../files.js";
 import type * as lib___fixtures___minimalExpoApp from "../lib/__fixtures__/minimalExpoApp.js";
+import type * as lib_agentRunner_decision from "../lib/agentRunner/decision.js";
+import type * as lib_agentRunner_forbidden from "../lib/agentRunner/forbidden.js";
+import type * as lib_agentRunner_overlay from "../lib/agentRunner/overlay.js";
+import type * as lib_agentRunner_report from "../lib/agentRunner/report.js";
+import type * as lib_agentRunner_token from "../lib/agentRunner/token.js";
 import type * as lib_palette from "../lib/palette.js";
 import type * as lib_sandbox_daytona from "../lib/sandbox/daytona.js";
 import type * as lib_sandbox_index from "../lib/sandbox/index.js";
@@ -38,6 +44,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  agentBridge: typeof agentBridge;
   "agents/codegen": typeof agents_codegen;
   "agents/designSystem": typeof agents_designSystem;
   "agents/prompt": typeof agents_prompt;
@@ -47,6 +54,11 @@ declare const fullApi: ApiFromModules<{
   codegenWorkflow: typeof codegenWorkflow;
   files: typeof files;
   "lib/__fixtures__/minimalExpoApp": typeof lib___fixtures___minimalExpoApp;
+  "lib/agentRunner/decision": typeof lib_agentRunner_decision;
+  "lib/agentRunner/forbidden": typeof lib_agentRunner_forbidden;
+  "lib/agentRunner/overlay": typeof lib_agentRunner_overlay;
+  "lib/agentRunner/report": typeof lib_agentRunner_report;
+  "lib/agentRunner/token": typeof lib_agentRunner_token;
   "lib/palette": typeof lib_palette;
   "lib/sandbox/daytona": typeof lib_sandbox_daytona;
   "lib/sandbox/index": typeof lib_sandbox_index;

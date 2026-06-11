@@ -54,6 +54,20 @@ export default defineSchema({
     parentVersionId: v.optional(v.id("versions")),
     plan: v.optional(v.string()), // JSON-encoded app plan from the plan step (first-gen only)
     createdAt: v.number(),
+    // Agent runner bridge fields (step 4)
+    agentJobId: v.optional(v.string()), // external runner job id (G5 eager-delete guard)
+    agentHeartbeatAt: v.optional(v.number()), // unix ms of last heartbeat
+    agentPhase: v.optional(v.string()), // e.g. "generating" | "verifying" | "complete"
+    costUsd: v.optional(v.number()), // cost from runner report
+    usage: v.optional(v.object({
+      inputTokens: v.number(),
+      outputTokens: v.number(),
+      cacheReadTokens: v.number(),
+      cacheWriteTokens: v.number(),
+    })),
+    agentStreamId: v.optional(v.string()), // active streaming row id in the agent component
+    agentStreamCursor: v.optional(v.number()), // current stream delta cursor
+    agentStreamFullText: v.optional(v.string()), // accumulated full text for persist-at-complete
   })
     .index("by_project", ["projectId"])
     .index("by_project_index", ["projectId", "index"]),

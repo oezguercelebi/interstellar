@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { decide, HEARTBEAT_STALE_MS } from "./lib/agentRunner/decision";
 import type { Doc } from "./_generated/dataModel";
 import { makeAgent, makeCodegenTools } from "./agents/codegen";
 import { buildSystemBlocks } from "./agents/prompt";
@@ -259,5 +260,65 @@ export const runVariant = internalAction({
     });
 
     return { ok, fileCount: files.filter((f) => !f.deleted).length };
+  },
+});
+
+/**
+ * Poll until the external agent runner finishes or is declared dead.
+ *
+ * Journal-safe: this is a new conditional step and does not affect existing
+ * workflow journals (the workflow only calls it when awaitVariant is wired in).
+ * Polls every ~12 s using the decision state machine; returns { ok } so the
+ * workflow can decide whether to proceed to provisionPreview.
+ */
+export const awaitVariant = internalAction({
+  args: { versionId: v.id("versions") },
+  handler: async (ctx, { versionId }): Promise<{ ok: boolean }> => {
+    let notFoundCount = 0;
+    let attempt = 0;
+
+    while (true) {
+      const version = await ctx.runQuery(internal.versions.getById, { versionId });
+      if (!version) {
+        notFoundCount++;
+        if (notFoundCount > 2) throw new Error("version not found after 3 attempts");
+        await new Promise((r) => setTimeout(r, 12_000));
+        continue;
+      }
+      notFoundCount = 0;
+
+      const status = version.status;
+      // Map version status to JobStatus for the decision machine.
+      const jobStatus =
+        status === "ready" ? "complete"
+        : status === "failed" ? "failed"
+        : "running";
+
+      const heartbeatAgeMs = version.agentHeartbeatAt
+        ? Date.now() - version.agentHeartbeatAt
+        : HEARTBEAT_STALE_MS + 1; // treat missing heartbeat as stale
+
+      const action = decide({
+        jobStatus,
+        heartbeatAgeMs,
+        attempt,
+        sandboxState: "unknown", // sandbox state not tracked here; rely on heartbeat
+        tscCycle: 0,
+        isEdit: false,
+        budgetExhausted: false,
+        turnLimitReached: false,
+        notFoundCount: 0,
+      });
+
+      if (action === "complete") return { ok: true };
+      if (action === "fail") return { ok: false };
+      if (action === "continue") {
+        await new Promise((r) => setTimeout(r, 12_000));
+        continue;
+      }
+      // retry-* actions: throw so the workflow step retries.
+      attempt++;
+      throw new Error(`awaitVariant retry triggered: ${action}`);
+    }
   },
 });
