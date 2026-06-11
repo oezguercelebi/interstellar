@@ -377,7 +377,10 @@ export const launchAgentRunner = internalAction({
     function shellQ(val: string): string {
       return `'${val.replace(/'/g, "'\\''")}'`;
     }
-    const convexUrl = process.env.CONVEX_SITE_URL ?? process.env.CONVEX_URL ?? "";
+    // The runner POSTs to {CONVEX_URL}/api/mutation — the Convex function-call
+    // HTTP API, which lives ONLY on the .convex.cloud host (CONVEX_CLOUD_URL).
+    // CONVEX_SITE_URL is the .convex.site HTTP-actions host and 404s /api/mutation.
+    const convexUrl = process.env.CONVEX_CLOUD_URL ?? process.env.CONVEX_URL ?? "";
     const anthropicKey = process.env.AGENT_RUNNER_ANTHROPIC_KEY ?? "";
     const envPairs: Array<[string, string]> = [
       ["ANTHROPIC_API_KEY", anthropicKey],
