@@ -488,8 +488,9 @@ function normalizeMirrorPath(rawPath, appCwd) {
 const APP_CWD = "/home/daytona/expo-app";
 const MAX_TSC_CYCLES = 4;
 const BUNDLE_PROBE_URL = "http://localhost:8081/index.bundle?platform=web&dev=true";
-const METRO_POLL_INTERVAL_MS = 3_000;
-const METRO_POLL_MAX_MS = 90_000;
+const METRO_HTML_PROBE_URL = "http://localhost:8081/";
+const METRO_POLL_INTERVAL_MS = 4_000;
+const METRO_POLL_MAX_MS = 160_000;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SELF-TEST (--self-test flag — no network, no SDK)
@@ -602,8 +603,9 @@ async function runSelfTests() {
 
   // Metro constants
   assert(typeof BUNDLE_PROBE_URL === "string" && BUNDLE_PROBE_URL.includes("index.bundle"), "BUNDLE_PROBE_URL defined and looks like a bundle URL");
-  assert(METRO_POLL_MAX_MS === 90_000, "METRO_POLL_MAX_MS is 90s");
-  assert(METRO_POLL_INTERVAL_MS === 3_000, "METRO_POLL_INTERVAL_MS is 3s");
+  assert(typeof METRO_HTML_PROBE_URL === "string" && METRO_HTML_PROBE_URL.includes("localhost:8081"), "METRO_HTML_PROBE_URL defined");
+  assert(METRO_POLL_MAX_MS === 160_000, "METRO_POLL_MAX_MS is 160s");
+  assert(METRO_POLL_INTERVAL_MS === 4_000, "METRO_POLL_INTERVAL_MS is 4s");
 
   // system prompt option
   const sysOpt = buildSystemPromptOption("classic", "");
@@ -754,7 +756,7 @@ async function flushDelta() {
 // ── tsc verify (runs locally inside the sandbox box) ─────────────────────────
 // tsc is invoked with execSync — it's a local process, no bridge round-trip.
 
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 
 function runTscLocally(cwd) {
@@ -1013,53 +1015,57 @@ async function run() {
     const { hasErrors: finalErrors } = runTscLocally(APP_CWD);
     console.log(\`[runner] final tsc: hasErrors=\${finalErrors}\`);
 
-    // ── Metro: kill any lingering expo start ─────────────────────────────────
-    try {
-      execSync("pkill -f 'expo start' || true", { cwd: APP_CWD, stdio: "pipe", timeout: 5_000 });
-    } catch { /* pkill not found or no match — harmless */ }
+    // ── Metro: kill any lingering expo start (excluding this runner process) ──
+    execSync("pkill -f 'expo start' || true", { stdio: "ignore" });
 
-    // ── Metro: spawn detached (survives run.mjs exit) ────────────────────────
+    // ── Metro: shell double-fork — survives Daytona session teardown ─────────
+    // Legacy form from convex/lib/sandbox/daytona.ts: subshell-backgrounded
+    // nohup so the process tree is detached from this runner's session.
+    // execSync blocks for the sleep 5, giving Metro a head start before probing.
+    const METRO_LAUNCH_SHELL = \`(CI=1 EXPO_NO_TELEMETRY=1 nohup ./node_modules/.bin/expo start --web --port 8081 < /dev/null > /tmp/expo.log 2>&1 &) ; sleep 5\`;
     let metroStarted = false;
     try {
-      const metroLogFd = fs.openSync("/tmp/metro.log", "a");
-      const metro = spawn(
-        "./node_modules/.bin/expo",
-        ["start", "--web", "--port", "8081"],
-        {
-          cwd: APP_CWD,
-          env: { ...process.env, CI: "1", EXPO_NO_TELEMETRY: "1" },
-          detached: true,
-          stdio: ["ignore", metroLogFd, metroLogFd],
-        },
-      );
-      metro.unref();
+      execSync(METRO_LAUNCH_SHELL, { cwd: APP_CWD, stdio: "ignore" });
       metroStarted = true;
-      console.log("[runner] Metro spawned detached (pid=" + metro.pid + ")");
+      console.log("[metro] launched via shell double-fork, logs at /tmp/expo.log");
+      console.log("[metro] Metro logs at /tmp/expo.log");
     } catch (err) {
-      console.warn("[runner] Metro spawn failed:", err.message);
+      console.warn("[metro] Metro launch failed:", err.message);
     }
 
     // ── Bundle probe: poll until Metro serves the web bundle ─────────────────
+    // Budget parity with legacy waitForReady (37×4s ≈ 150s → 160s here).
+    // Each iteration: warm GET / (html), then GET index.bundle (bundle).
     let bundleProbeOk = false;
 
     if (metroStarted) {
-      console.log("[runner] polling bundle: " + BUNDLE_PROBE_URL);
+      const totalAttempts = Math.ceil(METRO_POLL_MAX_MS / METRO_POLL_INTERVAL_MS);
+      let attempt = 0;
       const deadline = Date.now() + METRO_POLL_MAX_MS;
       while (Date.now() < deadline) {
+        attempt++;
+        let htmlStatus = 0;
+        let bundleStatus = 0;
         try {
-          const probeRes = await fetch(BUNDLE_PROBE_URL);
-          if (probeRes.ok) {
+          const htmlRes = await fetch(METRO_HTML_PROBE_URL);
+          htmlStatus = htmlRes.status;
+        } catch { /* Metro not ready yet */ }
+        try {
+          const bundleRes = await fetch(BUNDLE_PROBE_URL);
+          bundleStatus = bundleRes.status;
+          if (bundleStatus === 200) {
             bundleProbeOk = true;
-            console.log("[runner] bundle probe: 200 OK");
-            break;
           }
-        } catch {
-          // Metro not ready yet
+        } catch { /* Metro not ready yet */ }
+        console.log(\`[metro] probe attempt \${attempt}/\${totalAttempts}: html=\${htmlStatus}, bundle=\${bundleStatus}\`);
+        if (bundleProbeOk) {
+          console.log("[metro] bundle probe: 200 OK");
+          break;
         }
         await new Promise((r) => setTimeout(r, METRO_POLL_INTERVAL_MS));
       }
       if (!bundleProbeOk) {
-        console.warn("[runner] bundle probe timed out after " + METRO_POLL_MAX_MS + "ms");
+        console.warn("[metro] bundle probe timed out after " + METRO_POLL_MAX_MS + "ms");
       }
     }
 
@@ -1082,6 +1088,15 @@ async function run() {
 
     console.log("[runner] bridge:complete ok=" + report.ok + " costUsd=" + report.costUsd);
     await bridgeMutation("agentBridge:complete", { versionId, report });
+
+    // ── Post-complete Metro alive check ───────────────────────────────────────
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      execSync("pgrep -f 'expo start'", { stdio: "ignore" });
+      console.log("[metro] post-complete alive check: Metro still running");
+    } catch {
+      console.log("[metro] post-complete alive check: Metro NOT running (teardown regression?)");
+    }
   } catch (err) {
     console.error("[runner] fatal:", err);
     await bridgeMutation("agentBridge:fail", { versionId, reason: String(err) }).catch(() => {});

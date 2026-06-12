@@ -863,14 +863,18 @@ test("run.mjs has bundle probe URL (index.bundle?platform=web)", () => {
   assert.match(src, /bundleProbeOk/);
 });
 
-test("run.mjs spawns Metro detached before bridge.complete", () => {
+test("run.mjs launches Metro via shell double-fork (nohup subshell) before bridge.complete", () => {
   const src = fs.readFileSync(
     path.join(ROOT_FOR_TEST, "scripts/agent-runner/run.mjs"),
     "utf8",
   );
-  assert.match(src, /detached:\s*true/);
-  assert.match(src, /metro\.unref\(\)/);
+  // Shell double-fork pattern: nohup inside a subshell backgrounded with &
+  assert.match(src, /nohup.*expo start.*&\)/);
+  assert.match(src, /METRO_LAUNCH_SHELL/);
   assert.match(src, /metroStarted/);
+  // Must NOT use the Node spawn detached pattern (it dies on session teardown)
+  assert.ok(!src.includes("detached: true"), "must not use Node spawn detached: true");
+  assert.ok(!src.includes("metro.unref()"), "must not use metro.unref() (no spawn process handle)");
 });
 
 test("run.mjs sets ok=false when bundle probe times out", () => {
